@@ -1,0 +1,46 @@
+repos:
+  # Ruff — linting and formatting (rev kept equal to the root uv constraint)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  # MyPy — scoped to the touched package; the whole workspace is re-checked
+  # on push by `make lint`.
+  - repo: local
+    hooks:
+      - id: mypy-supertraj-met
+        name: mypy (supertraj-met)
+        entry: uv run --package supertraj-met mypy --config-file packages/supertraj-met/pyproject.toml
+        language: system
+        types: [python]
+        files: ^packages/supertraj-met/
+        pass_filenames: false
+        stages: [pre-commit]
+        args: [packages/supertraj-met/src/, packages/supertraj-met/tests_supertraj_met/]
+      - id: mypy-all
+        name: mypy (ALL packages — pre-push)
+        entry: make lint
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
+  # Conventional commits
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.4.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+
+  # Basic checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: [--unsafe]
+      - id: check-added-large-files

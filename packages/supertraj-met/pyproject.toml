@@ -10,6 +10,9 @@ authors = [{ name = "Gabriel Jarry", email = "jarry.gabriel@gmail.com" }]
 keywords = ["aviation", "ads-b", "era5", "arpege", "weather", "trajectory"]
 classifiers = [
     "Development Status :: 3 - Alpha",
+    # Upload guard: the publish workflow and PyPI both refuse this classifier.
+    # Remove it only when a public release has been approved.
+    "Private :: Do Not Upload",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: European Union Public Licence 1.2 (EUPL 1.2)",
     "Programming Language :: Python :: 3.12",
@@ -49,6 +52,9 @@ version-file = "src/supertraj_met/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/supertraj_met"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"docs/index.md" = "supertraj_met/docs/index.md"
 
 [tool.axm-audit.mirror]
 # base.py: the Source protocol and CubeKey, exercised by every source's tests;

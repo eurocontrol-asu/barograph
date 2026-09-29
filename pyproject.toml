@@ -78,3 +78,11 @@ markers = [
 extend-exclude = ["*.md"]
 target-version = "py312"
 line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "BLE", "C4", "C901", "PLR", "S", "T20", "RUF"]
+ignore = ["S101"]
+
+[tool.ruff.lint.per-file-ignores]
+# CI helper copied from the axm workspaces: prints the matrix and calls git.
+".github/scripts/*" = ["S603", "S607", "T201", "PLR2004"]
