@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[project]
+name = "supertraj-met"
+dynamic = ["version"]
+description = "Fast weather retrieval along aircraft trajectories: ERA5 model/pressure levels, ARPEGE, Open-Meteo archives"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+authors = [{ name = "gjarry", email = "jarry.gabriel@gmail.com" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Atmospheric Science",
+    "Typing :: Typed",
+]
+dependencies = [
+    "numpy>=1.26",
+    "numcodecs>=0.12",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+grib = ["eccodes>=2.38", "eccodeslib>=2.38"]
+pandas = ["pandas>=2.0"]
+openmeteo = ["omfiles>=1.2"]
+
+[tool.hatch.version]
+source = "vcs"
+fallback-version = "0.1.0.dev0"
+raw-options = { root = "../.." }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/supertraj_met"]

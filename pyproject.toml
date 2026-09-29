@@ -1,0 +1,65 @@
+[project]
+name = "supertraj-workspace"
+version = "0.0.0"
+description = "supertraj: weather along aircraft trajectories (retrieval, and later learned corrections)"
+requires-python = ">=3.12"
+dependencies = ["supertraj-met[grib,pandas,openmeteo]"]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+supertraj-met = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=5.0",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "pandas-stubs>=2.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["packages/supertraj-met/tests"]
+pythonpath = ["packages/supertraj-met/tests"]
+addopts = "--import-mode=importlib -m 'not live'"
+markers = [
+    "integration: real I/O against local stores or mirrors",
+    "live: downloads from public buckets (opt-in: -m live)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "C4", "S", "T20", "RUF", "C901"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.per-file-ignores]
+"packages/*/tests/**" = ["S101", "S311"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["supertraj_met"]
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+files = ["packages/supertraj-met/src"]
+
+[[tool.mypy.overrides]]
+module = ["numcodecs", "numcodecs.*", "eccodes", "eccodes.*", "omfiles", "omfiles.*"]
+ignore_missing_imports = true
+
+[tool.coverage.run]
+branch = true
+source = ["supertraj_met"]
+
+[tool.coverage.report]
+show_missing = true
