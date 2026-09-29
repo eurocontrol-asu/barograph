@@ -9,3 +9,10 @@ coverage.xml
 dist/
 build/
 *.egg-info/
+
+# coverage and build outputs
+coverage.xml
+coverage_html/
+.coverage
+site/
+_version.py

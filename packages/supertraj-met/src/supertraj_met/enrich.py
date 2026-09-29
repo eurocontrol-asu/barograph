@@ -15,7 +15,8 @@ from __future__ import annotations
 import threading
 import time
 import warnings
-from collections.abc import Iterator
+from collections import Counter
+from collections.abc import Callable, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,10 +26,16 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from supertraj_met.base import CubeKey, DataUnavailableError, Source
-from supertraj_met.cache import CubeCache
+from supertraj_met.cache import CubeCache, CubeQuery
 from supertraj_met.domain import Cube, Domain
 from supertraj_met.isa import pressure_from_altitude_ft
-from supertraj_met.kernel import Flag, SurfacePressureMode, VerticalMethod, sample
+from supertraj_met.kernel import (
+    Flag,
+    SampleOptions,
+    SurfacePressureMode,
+    VerticalMethod,
+    sample,
+)
 
 __all__ = ["EnrichResult", "Enricher", "UncoveredPointsWarning"]
 
@@ -55,6 +62,7 @@ class EnrichResult:
 
     @property
     def valid(self) -> NDArray[np.bool_]:
+        """Mask of the points with a value (no flag set)."""
         return np.asarray(self.flags == Flag.OK)
 
 
@@ -66,10 +74,63 @@ class _CubeRequest:
 
 
 @dataclass(frozen=True)
+class _Points:
+    """Valid points of a run: interpolation weight in time, position, pressure."""
+
+    w: NDArray[np.float64]
+    lat: NDArray[np.float64]
+    lon: NDArray[np.float64]
+    p: NDArray[np.float64]
+
+    def take(self, sel: NDArray[np.int64] | NDArray[np.bool_]) -> _Points:
+        """The subset of points selected by ``sel``."""
+        return _Points(self.w[sel], self.lat[sel], self.lon[sel], self.p[sel])
+
+
+@dataclass(frozen=True)
 class _Interval:
     t0: np.datetime64
     points: NDArray[np.int64]  # indices into the valid points
     keys: tuple[CubeKey, CubeKey | None]  # second key only if some point needs it
+
+
+class _Prefetcher:
+    """Fetches cubes in order of first use, ``depth`` cubes ahead; frees them after last use."""
+
+    def __init__(
+        self,
+        intervals: list[_Interval],
+        fetch: Callable[[CubeKey], Future[Cube | None]],
+        depth: int,
+    ) -> None:
+        used = [key for iv in intervals for key in iv.keys if key is not None]
+        self._order = list(dict.fromkeys(used))
+        self._position = {key: i for i, key in enumerate(self._order)}
+        self._remaining = Counter(used)
+        self._futures: dict[CubeKey, Future[Cube | None]] = {}
+        self._submitted = 0
+        self._fetch = fetch
+        self._depth = depth
+
+    def cubes(self, iv: _Interval) -> tuple[Cube | None, Cube | None]:
+        """The two cubes of an interval (waiting for them), after scheduling the next ones."""
+        needed = [k for k in iv.keys if k is not None]
+        target = min(max(self._position[k] for k in needed) + self._depth, len(self._order))
+        while self._submitted < target:
+            key = self._order[self._submitted]
+            self._futures[key] = self._fetch(key)
+            self._submitted += 1
+        k0, k1 = iv.keys
+        return self._futures[k0].result(), None if k1 is None else self._futures[k1].result()
+
+    def release(self, iv: _Interval) -> None:
+        """Forget the cubes this interval was the last user of."""
+        for key in iv.keys:
+            if key is None:
+                continue
+            self._remaining[key] -= 1
+            if self._remaining[key] == 0:
+                self._futures.pop(key)
 
 
 class Enricher:
@@ -105,7 +166,7 @@ class Enricher:
         ``"raise"`` raises :class:`DataUnavailableError`, ``"flag"`` only flags.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - keyword-only configuration of the public enricher
         self,
         source: Source,
         *,
@@ -184,6 +245,7 @@ class Enricher:
         t0 = t_ok - (t_ok - _EPOCH) % step
         w = (t_ok - t0) / step
         la, lo, pp = lat[idx], lon[idx], p[idx]
+        points = _Points(w, la, lo, pp)
         intervals, requests = self._plan(t0, w, la, lo, pp)
         counters: dict[str, Any] = {
             "cubes": len(requests),
@@ -198,7 +260,7 @@ class Enricher:
         ):
             for iv, cube0, cube1 in self._stream(intervals, requests, io, cubes, counters):
                 sel = iv.points
-                v, f = self._interpolate(cube0, cube1, w[sel], la[sel], lo[sel], pp[sel])
+                v, f = self._interpolate(cube0, cube1, points.take(sel))
                 for name in values:
                     values[name][idx[sel]] = v[name]
                 flags[idx[sel]] = f
@@ -269,36 +331,16 @@ class Enricher:
         counters: dict[str, Any],
     ) -> Iterator[tuple[_Interval, Cube | None, Cube | None]]:
         """Intervals with their cubes; cubes are fetched ahead and freed after last use."""
-        order: list[CubeKey] = []
-        remaining: dict[CubeKey, int] = {}
-        for iv in intervals:
-            for key in iv.keys:
-                if key is None:
-                    continue
-                if key not in remaining:
-                    order.append(key)
-                    remaining[key] = 0
-                remaining[key] += 1
-        position = {key: i for i, key in enumerate(order)}
-        futures: dict[CubeKey, Future[Cube | None]] = {}
-        submitted = 0
 
-        def submit_until(count: int) -> None:
-            nonlocal submitted
-            while submitted < min(count, len(order)):
-                key = order[submitted]
-                futures[key] = pool.submit(self._get_cube, requests[key], io, counters)
-                submitted += 1
+        def fetch(key: CubeKey) -> Future[Cube | None]:
+            """Submit the download of one cube."""
+            return pool.submit(self._get_cube, requests[key], io, counters)
 
+        ahead = _Prefetcher(intervals, fetch, self.prefetch)
         for iv in intervals:
-            needed = [k for k in iv.keys if k is not None]
-            submit_until(max(position[k] for k in needed) + self.prefetch)
-            cubes = [futures[k].result() if k is not None else None for k in iv.keys]
-            yield iv, cubes[0], cubes[1]
-            for key in needed:
-                remaining[key] -= 1
-                if remaining[key] == 0:
-                    futures.pop(key)
+            cube0, cube1 = ahead.cubes(iv)
+            yield iv, cube0, cube1
+            ahead.release(iv)
 
     def _get_cube(
         self, req: _CubeRequest, io: ThreadPoolExecutor, counters: dict[str, Any]
@@ -321,9 +363,9 @@ class Enricher:
             return cube
 
     def _cached(self, src: str, req: _CubeRequest) -> Cube | None:
-        assert self.cache is not None  # noqa: S101
-        fields = list(self.source.fields)
-        return self.cache.find(src, req.key, req.domain, req.p_range, fields, self.level_margin)
+        assert self.cache is not None
+        query = CubeQuery(req.key, req.domain, req.p_range, self.level_margin)
+        return self.cache.find(src, query, list(self.source.fields))
 
     def _download(
         self, req: _CubeRequest, io: ThreadPoolExecutor, counters: dict[str, Any]
@@ -347,32 +389,27 @@ class Enricher:
         self,
         cube0: Cube | None,
         cube1: Cube | None,
-        w: NDArray[np.float64],
-        lat: NDArray[np.float64],
-        lon: NDArray[np.float64],
-        p: NDArray[np.float64],
+        pts: _Points,
     ) -> tuple[dict[str, NDArray[np.float64]], NDArray[np.uint8]]:
-        n = w.size
+        n = pts.w.size
         names = list(self.source.fields)
         if cube0 is None:
             return {k: np.full(n, np.nan) for k in names}, np.full(n, Flag.MISSING_DATA, np.uint8)
-        opts: dict[str, Any] = {
-            "vertical": self.vertical,
-            "surface_pressure": self.surface_pressure,
-        }
-        v0, flags = sample(cube0, lat, lon, p, **opts)
-        later = w > 0
+        opts = SampleOptions(self.vertical, self.surface_pressure)
+        v0, flags = sample(cube0, pts.lat, pts.lon, pts.p, opts)
+        later = pts.w > 0
         if not later.any():
             return v0, flags
         if cube1 is None:
             v1 = {k: np.full(int(later.sum()), np.nan) for k in names}
             f1 = np.full(int(later.sum()), Flag.MISSING_DATA, np.uint8)
         else:
-            v1, f1 = sample(cube1, lat[later], lon[later], p[later], **opts)
+            nxt = pts.take(later)
+            v1, f1 = sample(cube1, nxt.lat, nxt.lon, nxt.p, opts)
         flags = flags.copy()
         flags[later] |= np.where(flags[later] == 0, f1, 0).astype(np.uint8)
         out = {}
-        wl = w[later]
+        wl = pts.w[later]
         for name in names:
             blended = v0[name].copy()
             blended[later] = (1.0 - wl) * v0[name][later] + wl * v1[name]

@@ -5,9 +5,9 @@ from pathlib import Path
 import numcodecs
 import numpy as np
 import pytest
-from synthetic import GRID_LAT, write_stores
 
 from supertraj_met.store import FileStore, ZarrStore
+from synthetic import GRID_LAT, write_stores
 
 pytestmark = pytest.mark.integration
 

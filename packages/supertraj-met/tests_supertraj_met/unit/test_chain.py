@@ -3,67 +3,24 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from concurrent.futures import Executor
 
 import numpy as np
 import pytest
-from synthetic import EPOCH
 
-from supertraj_met import CubeKey, DataUnavailableError, Enricher, Flag
+from supertraj_met import DataUnavailableError, Enricher, Flag
+from supertraj_met.base import CubeKey
 from supertraj_met.chain import SourceChain
 from supertraj_met.domain import Cube, Domain
 from supertraj_met.enrich import UncoveredPointsWarning
-from supertraj_met.store import TransferStats
+from synthetic import EPOCH, FakeSource
 
 H = np.timedelta64(1, "h")
 
 
-class FakeSource:
-    """Uniform fields whose value identifies the source; fixed coverage."""
-
-    time_step = H
-
-    def __init__(self, name: str, value: float, start: int, stop: int, make: Callable[..., Cube]):
-        self.source_id = name
-        self.fields = {"u": "u", "v": "v", "t": "t"}
-        self.value = value
-        self.span = (EPOCH + start * H, EPOCH + stop * H)
-        self.make = make
-        self.fetched: list[CubeKey] = []
-
-    @property
-    def stats(self) -> list[TransferStats]:
-        return [TransferStats()]
-
-    def coverage(self) -> tuple[np.datetime64, np.datetime64]:
-        return self.span
-
-    def cube_keys(self, t0: np.datetime64) -> tuple[CubeKey, CubeKey]:
-        h = np.datetime64(t0, "h")
-        return CubeKey(h), CubeKey(h + H)
-
-    def fetch(
-        self,
-        key: CubeKey,
-        domain: Domain,
-        p_range: tuple[float, float],
-        *,
-        level_margin: int = 1,
-        executor: Executor | None = None,
-    ) -> Cube:
-        if not self.span[0] <= key.valid <= self.span[1]:
-            raise DataUnavailableError(str(key))
-        self.fetched.append(key)
-        cube = self.make(hour=key.valid)
-        cube.fields = {k: np.full_like(v, self.value) for k, v in cube.fields.items()}
-        cube.source = self.source_id
-        return cube
-
-
 @pytest.fixture
 def pair(make_cube: Callable[..., Cube]) -> tuple[FakeSource, FakeSource]:
-    recent = FakeSource("recent", 2.0, 100, 200, make_cube)
-    archive = FakeSource("archive", 1.0, 0, 150, make_cube)
+    recent = FakeSource("recent", 2.0, (100, 200), make_cube)
+    archive = FakeSource("archive", 1.0, (0, 150), make_cube)
     return recent, archive
 
 
@@ -114,3 +71,20 @@ def test_chain_rejects_incompatible_sources(pair: tuple[FakeSource, FakeSource])
     archive.fields = {"u": "u"}
     with pytest.raises(ValueError, match="same output fields"):
         SourceChain(recent, archive)
+
+
+def test_chain_requires_consistent_distinct_sources(pair: tuple[FakeSource, FakeSource]) -> None:
+    recent, archive = pair
+    with pytest.raises(ValueError, match="at least one"):
+        SourceChain()
+    with pytest.raises(ValueError, match="distinct ids"):
+        SourceChain(recent, recent)
+    archive.time_step = np.timedelta64(3, "h")
+    with pytest.raises(ValueError, match="time step"):
+        SourceChain(recent, archive)
+
+
+def test_unrouted_keys_are_refused(pair: tuple[FakeSource, FakeSource]) -> None:
+    chain = SourceChain(*pair)
+    with pytest.raises(DataUnavailableError, match="not routed"):
+        chain.fetch(CubeKey(EPOCH), Domain(40, 50, 0, 10), (2e4, 3e4))

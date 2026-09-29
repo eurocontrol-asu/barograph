@@ -53,6 +53,8 @@ _UNITS = re.compile(r"hours since (\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2}(?::\d{2
 
 @dataclass(frozen=True)
 class SurfacePressure:
+    """Where a hybrid-level source reads its surface pressure."""
+
     store: ZarrStore
     array: str = "surface_pressure"
 
@@ -65,7 +67,7 @@ class GridSource:
     requested pressures, read with block-level range requests.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - keyword-only configuration of a public source
         self,
         source_id: str,
         store: ZarrStore,
@@ -143,7 +145,7 @@ class GridSource:
         begin = np.datetime64(start, "h")
         end = (
             np.datetime64(stop, "D") + np.timedelta64(23, "h")
-            if len(stop) <= 10
+            if len(stop) <= len("YYYY-MM-DD")
             else np.datetime64(stop, "h")
         )
         return begin, np.datetime64(end, "h")

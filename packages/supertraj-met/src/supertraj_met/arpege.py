@@ -33,7 +33,12 @@ from supertraj_met.base import CubeKey, DataUnavailableError
 from supertraj_met.domain import Cube, Domain, GridIndex
 from supertraj_met.grib import GribIndex, decode_message, fetch_messages
 from supertraj_met.store import ByteStore, FileStore, HttpStore, MissingChunkError, TransferStats
-from supertraj_met.vertical import STANDARD_SURFACE_PRESSURE, VerticalCoordinate, pressure_levels
+from supertraj_met.vertical import (
+    MIN_LEVELS,
+    STANDARD_SURFACE_PRESSURE,
+    VerticalCoordinate,
+    pressure_levels,
+)
 
 __all__ = ["ARPEGE_BASE_URL", "ARPEGE_LISTING_URL", "ARPEGE_PARAMS", "ArpegeSource"]
 
@@ -67,6 +72,15 @@ type Resolution = Literal["01", "025"]
 type RunPolicy = Literal["latest", "daily"]
 
 
+def _checked_fields(fields: dict[str, str] | None) -> dict[str, str]:
+    """Output name -> ARPEGE short name, defaulting to u, v, t."""
+    checked = dict(fields or {"u": "u", "v": "v", "t": "t"})
+    unknown = set(checked.values()) - set(ARPEGE_PARAMS)
+    if unknown:
+        raise ValueError(f"unknown ARPEGE variables {sorted(unknown)}")
+    return checked
+
+
 class ArpegeSource:
     """ARPEGE isobaric fields.
 
@@ -89,7 +103,7 @@ class ArpegeSource:
         Directory caching the per-file message indexes (strongly recommended).
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - keyword-only configuration of a public source
         self,
         *,
         resolution: Resolution = "01",
@@ -108,22 +122,18 @@ class ArpegeSource:
             raise ValueError(f"unknown resolution {resolution!r}")
         self.resolution = resolution
         self.package = package
-        self.fields = dict(fields or {"u": "u", "v": "v", "t": "t"})
-        unknown = set(self.fields.values()) - set(ARPEGE_PARAMS)
-        if unknown:
-            raise ValueError(f"unknown ARPEGE variables {sorted(unknown)}")
+        self.fields = _checked_fields(fields)
         self.levels = None if levels is None else sorted(int(x) for x in levels)
         self.run = run if isinstance(run, str) else np.datetime64(run, "h")
         self.run_hours = sorted(run_hours)
         self.max_run_fallback = max_run_fallback
         self.time_step = _HOUR  # hourly for isobaric levels >= 100 hPa on both grids
-        if store is None:
-            store = HttpStore(base_url) if "://" in base_url else FileStore(base_url)
-        self.store = store
+        is_local = "://" not in base_url
+        self.store = store or (FileStore(base_url) if is_local else HttpStore(base_url))
         self.index_dir = None if index_dir is None else Path(index_dir).expanduser()
         self.source_id = f"arpege-{resolution}-{package}"
         self.listing_url = listing_url
-        self._local_root = Path(base_url) if "://" not in base_url else None
+        self._local_root = Path(base_url) if is_local else None
         self._coverage: tuple[float, tuple[np.datetime64, np.datetime64] | None] | None = None
         self._indexes: dict[str, GribIndex] = {}
         self._exists: dict[str, bool] = {}
@@ -131,6 +141,7 @@ class ArpegeSource:
 
     @property
     def stats(self) -> list[TransferStats]:
+        """Transfer counters of the underlying store."""
         return [self.store.stats]
 
     # -- coverage ------------------------------------------------------------------------------
@@ -177,6 +188,7 @@ class ArpegeSource:
 
     # -- files and runs ------------------------------------------------------------------------
     def file_key(self, run: np.datetime64, lead_h: int) -> str:
+        """Path of the GRIB2 file holding ``lead_h`` hours of ``run``."""
         for a, b in _LEAD_RANGES[self.resolution]:
             if a <= lead_h <= b:
                 break
@@ -228,11 +240,13 @@ class ArpegeSource:
         return candidates[0]  # nothing published: fetch will report the data as unavailable
 
     def cube_keys(self, t0: np.datetime64) -> tuple[CubeKey, CubeKey]:
+        """Cubes bracketing ``[t0, t0 + 1 h)``, both from the run chosen by :meth:`run_for`."""
         t0h = np.datetime64(t0, "h")
         run = self.run_for(t0h)
         return CubeKey(t0h, run), CubeKey(t0h + self.time_step, run)
 
     def index(self, key: str, executor: Executor | None = None) -> GribIndex:
+        """Message index of ``key``: memory, then the on-disk cache, else built and saved."""
         with self._lock:
             if key in self._indexes:
                 return self._indexes[key]
@@ -263,6 +277,7 @@ class ArpegeSource:
         level_margin: int = 1,
         executor: Executor | None = None,
     ) -> Cube:
+        """One validity time of one run over ``domain``, levels bracketing ``p_range`` (Pa)."""
         if key.run is None:
             raise ValueError("ARPEGE cubes need a run")
         lead_h = int((key.valid - key.run) / _HOUR)
@@ -321,6 +336,6 @@ class ArpegeSource:
         levels = sorted(common or set())
         if self.levels is not None:
             levels = [x for x in levels if x in set(self.levels)]
-        if len(levels) < 2:
+        if len(levels) < MIN_LEVELS:
             raise DataUnavailableError(f"{idx.key}: fewer than 2 common isobaric levels")
         return pressure_levels(levels)

@@ -51,6 +51,8 @@ class GribFormatError(ValueError):
 
 @dataclass(frozen=True)
 class GribMessage:
+    """Where one GRIB2 message is and what it holds (variable, level, step)."""
+
     offset: int
     length: int
     discipline: int
@@ -65,39 +67,78 @@ class GribMessage:
 
     @property
     def param(self) -> tuple[int, int, int]:
+        """``(discipline, category, number)`` identifying the variable."""
         return (self.discipline, self.category, self.number)
+
+
+# GRIB2 layout (WMO FM 92 GRIB edition 2)
+_INDICATOR_LEN = 16  # section 0: "GRIB", reserved, discipline, edition, total length
+_EDITION = 2
+_SECTION_HEAD = 5  # every section starts with its length (4 bytes) and number (1 byte)
+_LAST_SECTION = 8  # section 8 is the "7777" end marker
+_GRID, _PRODUCT, _REPRESENTATION = 3, 4, 5
+_MISSING_OCTET = 255
+
+
+def _grid_section(sec: bytes, info: dict[str, Any]) -> None:
+    info["npoints"] = struct.unpack(">I", sec[6:10])[0]
+    info["grid_template"] = struct.unpack(">H", sec[12:14])[0]
+
+
+def _product_section(sec: bytes, info: dict[str, Any]) -> None:
+    info["template4"] = struct.unpack(">H", sec[7:9])[0]
+    info["category"], info["number"] = sec[9], sec[10]
+    unit = sec[17]
+    info["step_h"] = struct.unpack(">i", sec[18:22])[0] * _TIME_UNITS_H.get(unit, np.nan)
+    info["level_type"] = sec[22]
+    scale = struct.unpack(">b", sec[23:24])[0]
+    value = struct.unpack(">i", sec[24:28])[0]
+    missing = sec[23] == _MISSING_OCTET
+    info["level"] = float("nan") if missing else float(value) * 10.0 ** (-scale)
+
+
+def _representation_section(sec: bytes, info: dict[str, Any]) -> None:
+    info["packing"] = struct.unpack(">H", sec[9:11])[0]
+
+
+# section number -> (minimum length read, parser)
+_SECTIONS = {
+    _GRID: (14, _grid_section),
+    _PRODUCT: (28, _product_section),
+    _REPRESENTATION: (11, _representation_section),
+}
+
+
+def _message_length(prefix: bytes, offset: int) -> int:
+    """Total message length from section 0, after checking it is a GRIB2 message."""
+    if len(prefix) < _INDICATOR_LEN or prefix[:4] != b"GRIB" or prefix[7] != _EDITION:
+        raise GribFormatError(f"no GRIB2 message at offset {offset}")
+    length = int(struct.unpack(">Q", prefix[8:_INDICATOR_LEN])[0])
+    if not _INDICATOR_LEN < length < _MAX_MESSAGE:
+        raise GribFormatError(f"implausible message length {length} at offset {offset}")
+    return length
+
+
+def _read_sections(prefix: bytes, offset: int, info: dict[str, Any]) -> None:
+    """Fill ``info`` from sections 3 (grid), 4 (product) and 5 (representation)."""
+    pos = _INDICATOR_LEN
+    while pos + _SECTION_HEAD <= len(prefix):
+        sec_len, num = struct.unpack(">IB", prefix[pos : pos + _SECTION_HEAD])
+        if sec_len < _SECTION_HEAD or num > _LAST_SECTION:
+            raise GribFormatError(f"corrupt section at offset {offset + pos}")
+        sec = prefix[pos : pos + sec_len]
+        if num in _SECTIONS and len(sec) >= _SECTIONS[num][0]:
+            _SECTIONS[num][1](sec, info)
+            if num == _REPRESENTATION:
+                return
+        pos += sec_len
 
 
 def parse_header(prefix: bytes, offset: int) -> GribMessage:
     """Parse sections 0, 3, 4 and 5 of a GRIB2 message from its first bytes."""
-    if len(prefix) < 16 or prefix[:4] != b"GRIB" or prefix[7] != 2:
-        raise GribFormatError(f"no GRIB2 message at offset {offset}")
-    length = struct.unpack(">Q", prefix[8:16])[0]
-    if not 16 < length < _MAX_MESSAGE:
-        raise GribFormatError(f"implausible message length {length} at offset {offset}")
+    length = _message_length(prefix, offset)
     info: dict[str, Any] = {"offset": offset, "length": length, "discipline": prefix[6]}
-    pos = 16
-    while pos + 5 <= len(prefix):
-        sec_len, num = struct.unpack(">IB", prefix[pos : pos + 5])
-        if sec_len < 5 or num > 8:
-            raise GribFormatError(f"corrupt section at offset {offset + pos}")
-        sec = prefix[pos : pos + sec_len]
-        if num == 3 and len(sec) >= 14:
-            info["npoints"] = struct.unpack(">I", sec[6:10])[0]
-            info["grid_template"] = struct.unpack(">H", sec[12:14])[0]
-        elif num == 4 and len(sec) >= 28:
-            info["template4"] = struct.unpack(">H", sec[7:9])[0]
-            info["category"], info["number"] = sec[9], sec[10]
-            unit = sec[17]
-            info["step_h"] = struct.unpack(">i", sec[18:22])[0] * _TIME_UNITS_H.get(unit, np.nan)
-            info["level_type"] = sec[22]
-            scale = struct.unpack(">b", sec[23:24])[0]
-            value = struct.unpack(">i", sec[24:28])[0]
-            info["level"] = float(value) * 10.0 ** (-scale) if sec[23] != 255 else float("nan")
-        elif num == 5 and len(sec) >= 11:
-            info["packing"] = struct.unpack(">H", sec[9:11])[0]
-            break
-        pos += sec_len
+    _read_sections(prefix, offset, info)
     missing = {"category", "level_type", "packing", "grid_template"} - set(info)
     if missing:
         raise GribFormatError(
@@ -120,6 +161,8 @@ def parse_header(prefix: bytes, offset: int) -> GribMessage:
 
 @dataclass
 class GribIndex:
+    """Messages of one GRIB2 file, looked up by (parameter, level, step)."""
+
     key: str
     size: int
     messages: list[GribMessage]
@@ -134,6 +177,7 @@ class GribIndex:
         executor: Executor | None = None,
         segments: int = 32,
     ) -> GribIndex:
+        """Walk the message headers of ``key`` (in parallel segments when an executor is given)."""
         size = store.size(key)
         if executor is None or segments <= 1 or size < 16 * _WINDOW:
             return cls(key, size, _walk(store, key, 0, size))
@@ -156,6 +200,7 @@ class GribIndex:
     def find(
         self, param: tuple[int, int, int], level_type: int, level: float, step_h: float
     ) -> GribMessage | None:
+        """The message of ``param`` at ``level`` and ``step_h``, if any."""
         return self._by_key.get((param, level_type, level, step_h))
 
     def levels(
@@ -173,20 +218,24 @@ class GribIndex:
         )
 
     def steps(self) -> list[float]:
+        """Forecast steps (hours) present in the file."""
         return sorted({m.step_h for m in self.messages})
 
     # -- persistence ---------------------------------------------------------------------------
     def to_json(self) -> str:
+        """Serialise the index."""
         return json.dumps(
             {"key": self.key, "size": self.size, "messages": [asdict(m) for m in self.messages]}
         )
 
     @classmethod
     def from_json(cls, text: str) -> GribIndex:
+        """Rebuild an index serialised by :meth:`to_json`."""
         d = json.loads(text)
         return cls(d["key"], d["size"], [GribMessage(**m) for m in d["messages"]])
 
     def save(self, path: Path) -> None:
+        """Write the index atomically to ``path``."""
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
         tmp.write_text(self.to_json())
@@ -303,6 +352,7 @@ def fetch_messages(
     """Download the given messages (one range request each)."""
 
     def get(m: GribMessage) -> bytes:
+        """Download one message."""
         return store.get(key, m.offset, m.offset + m.length)
 
     if executor is None or len(messages) <= 1:

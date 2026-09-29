@@ -1,12 +1,60 @@
 [project]
 name = "supertraj-workspace"
 version = "0.0.0"
-description = "supertraj: weather along aircraft trajectories (retrieval, and later learned corrections)"
 requires-python = ">=3.12"
+description = "supertraj workspace — weather along aircraft trajectories"
+license = "EUPL-1.2"
+license-files = ["LICENSE"]
+readme = "README.md"
+authors = [{ name = "Gabriel Jarry", email = "jarry.gabriel@gmail.com" }]
+keywords = ["aviation", "ads-b", "era5", "arpege", "weather", "trajectory"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
 dependencies = ["supertraj-met[grib,pandas,openmeteo]"]
+
+[project.urls]
+Homepage = "https://asu-eurocontrol.github.io/supertraj/"
+Repository = "https://github.com/asu-eurocontrol/supertraj"
+Documentation = "https://asu-eurocontrol.github.io/supertraj/"
+
+[dependency-groups]
+dev = [
+    "prek>=0.5.4",
+    "ruff>=0.16.9",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "pytest-xdist>=3.8.0",
+    "mypy>=2.3.1",
+    "pip-audit>=2.10.1",
+    "pandas-stubs>=2.0",
+]
+docs = [
+    "mkdocs-material>=9.7.6",
+    "mkdocs-monorepo-plugin>=1.1",
+    "mkdocstrings[python]>=1.0.6",
+    "mkdocs-gen-files>=0.6.1",
+    "mkdocs-literate-nav>=0.6.3",
+]
+quality = [
+    "axm-audit>=0.12",
+    "axm-init>=0.17",
+]
 
 [tool.uv]
 package = false
+required-version = ">=0.9"
+# The tools whose version IS the CI verdict are pinned once here; members only
+# declare a floor (same policy as the axm workspaces).
+constraint-dependencies = [
+    "ruff==0.16.9",
+    "mypy==2.3.1",
+    "pytest==9.1.1",
+    "prek==0.5.4",
+]
 
 [tool.uv.workspace]
 members = ["packages/*"]
@@ -14,52 +62,19 @@ members = ["packages/*"]
 [tool.uv.sources]
 supertraj-met = { workspace = true }
 
-[dependency-groups]
-dev = [
-    "pytest>=8.3",
-    "pytest-cov>=5.0",
-    "ruff>=0.6",
-    "mypy>=1.11",
-    "pandas-stubs>=2.0",
-]
-
 [tool.pytest.ini_options]
-testpaths = ["packages/supertraj-met/tests"]
-pythonpath = ["packages/supertraj-met/tests"]
-addopts = "--import-mode=importlib -m 'not live'"
+# Replicated from the member configs: a ROOT run is driven by this file.
+import_mode = "importlib"
+testpaths = ["packages/supertraj-met/tests_supertraj_met"]
+pythonpath = ["packages/supertraj-met/src", "packages/supertraj-met/tests_supertraj_met"]
+addopts = ["--import-mode=importlib", "-m", "not live"]
 markers = [
     "integration: real I/O against local stores or mirrors",
+    "e2e: end-to-end subprocess tests",
     "live: downloads from public buckets (opt-in: -m live)",
 ]
 
 [tool.ruff]
-line-length = 100
+extend-exclude = ["*.md"]
 target-version = "py312"
-
-[tool.ruff.lint]
-select = ["E", "F", "I", "N", "UP", "B", "C4", "S", "T20", "RUF", "C901"]
-
-[tool.ruff.lint.mccabe]
-max-complexity = 10
-
-[tool.ruff.lint.per-file-ignores]
-"packages/*/tests/**" = ["S101", "S311"]
-
-[tool.ruff.lint.isort]
-known-first-party = ["supertraj_met"]
-
-[tool.mypy]
-strict = true
-python_version = "3.12"
-files = ["packages/supertraj-met/src"]
-
-[[tool.mypy.overrides]]
-module = ["numcodecs", "numcodecs.*", "eccodes", "eccodes.*", "omfiles", "omfiles.*"]
-ignore_missing_imports = true
-
-[tool.coverage.run]
-branch = true
-source = ["supertraj_met"]
-
-[tool.coverage.report]
-show_missing = true
+line-length = 100

@@ -8,11 +8,10 @@ import pytest
 
 pytest.importorskip("eccodes")
 
-from synthetic import ARPEGE_RUN, EPOCH, arpege_truth, write_arpege_mirror
-
 from supertraj_met import ArpegeSource, Enricher, Flag
 from supertraj_met.grib import GribIndex
 from supertraj_met.store import FileStore
+from synthetic import ARPEGE_RUN, EPOCH, arpege_truth, write_arpege_mirror
 
 pytestmark = pytest.mark.integration
 

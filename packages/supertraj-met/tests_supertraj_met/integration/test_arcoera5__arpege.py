@@ -7,10 +7,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
-from synthetic import ARPEGE_RUN, EPOCH, arpege_truth, truth, write_stores
 
 from supertraj_met.compat import ArcoEra5, Arpege
 from supertraj_met.sources import ARCO_MODEL_LEVEL, ARCO_PRESSURE_LEVEL
+from synthetic import ARPEGE_RUN, EPOCH, arpege_truth, truth, write_stores
 
 pytestmark = pytest.mark.integration
 FEATURES = ["u_component_of_wind", "v_component_of_wind", "temperature"]
@@ -52,10 +52,13 @@ def test_arcoera5_interpolate_keeps_the_fastmeteo_contract(arco: Path) -> None:
 
 
 def test_global_mode_cache_serves_any_later_flight(arco: Path, tmp_path: Path) -> None:
-    kw = {"model_levels": 137, "features": FEATURES, "base_url": str(arco), "mode": "global"}
-    first = ArcoEra5(str(tmp_path), **kw)
-    first.interpolate(_frame(EPOCH, 44.0, 22.0))
-    second = ArcoEra5(str(tmp_path), **kw)
+    def engine() -> ArcoEra5:
+        return ArcoEra5(
+            str(tmp_path), model_levels=137, features=FEATURES, base_url=str(arco), mode="global"
+        )
+
+    engine().interpolate(_frame(EPOCH, 44.0, 22.0))
+    second = engine()
     out = second.interpolate(_frame(EPOCH, 10.0, 100.0))  # elsewhere on the globe
     assert second.last_result is not None
     assert second.last_result.stats["bytes"] == 0 and second.last_result.stats["cache_hits"] > 0

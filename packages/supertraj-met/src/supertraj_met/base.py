@@ -36,6 +36,7 @@ class CubeKey:
 
     @property
     def lead(self) -> np.timedelta64 | None:
+        """Forecast lead time (``None`` for analyses)."""
         return None if self.run is None else self.valid - self.run
 
     def __str__(self) -> str:
@@ -50,7 +51,9 @@ class Source(Protocol):
     time_step: np.timedelta64
 
     @property
-    def stats(self) -> list[TransferStats]: ...
+    def stats(self) -> list[TransferStats]:
+        """Transfer counters of the source's stores."""
+        ...
 
     def cube_keys(self, t0: np.datetime64) -> tuple[CubeKey, CubeKey]:
         """Cubes bracketing the interval ``[t0, t0 + time_step)``."""

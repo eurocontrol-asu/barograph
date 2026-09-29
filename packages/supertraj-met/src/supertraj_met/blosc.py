@@ -30,6 +30,8 @@ class UnsupportedFrameError(ValueError):
 
 @dataclass(frozen=True)
 class BloscHeader:
+    """Blosc-1 frame header with the start and end offset of every block."""
+
     version: int
     versionlz: int
     flags: int
@@ -42,10 +44,12 @@ class BloscHeader:
 
     @property
     def nblocks(self) -> int:
+        """Number of compressed blocks."""
         return len(self.starts)
 
     @property
     def header_size(self) -> int:
+        """Bytes of header plus block-offset table."""
         return _HEADER + 4 * self.nblocks
 
     def block_span(self, i: int) -> tuple[int, int]:
@@ -88,13 +92,12 @@ def header_prefix_size(first16: bytes) -> int:
     return _HEADER + 4 * (-(-nbytes // blocksize))
 
 
-def parse_header(prefix: bytes) -> BloscHeader:
-    """Parse a Blosc-1 header and its block-offset table from a frame prefix."""
-    if len(prefix) < _HEADER:
-        raise UnsupportedFrameError("truncated blosc header")
-    version, versionlz, flags, typesize = prefix[0], prefix[1], prefix[2], prefix[3]
-    nbytes, blocksize, cbytes = struct.unpack("<iii", prefix[4:16])
-    if version not in (1, 2):
+_VERSIONS = (1, 2)
+
+
+def _check_frame(version: int, flags: int, nbytes: int, blocksize: int) -> None:
+    """Reject frames whose blocks cannot be decoded independently."""
+    if version not in _VERSIONS:
         raise UnsupportedFrameError(f"unsupported blosc format version {version}")
     if flags & _MEMCPYED:
         raise UnsupportedFrameError("memcpyed frame")
@@ -102,17 +105,33 @@ def parse_header(prefix: bytes) -> BloscHeader:
         raise UnsupportedFrameError("blosc2 extended header")
     if blocksize <= 0 or nbytes <= 0:
         raise UnsupportedFrameError("empty or invalid frame")
+
+
+def _block_spans(
+    table: bytes, header_size: int, cbytes: int
+) -> tuple[NDArray[np.int64], NDArray[np.int64]]:
+    """Start and end offsets of every compressed block (blocks may be out of order)."""
+    starts = np.frombuffer(table, dtype="<i4").astype(np.int64)
+    ordered = np.sort(starts)
+    if np.any(np.diff(ordered) <= 0) or ordered[0] < header_size or ordered[-1] >= cbytes:
+        raise UnsupportedFrameError("inconsistent block offsets")
+    # a block ends where the physically next block starts (or at cbytes)
+    following = np.append(ordered[1:], cbytes)
+    return starts, following[np.searchsorted(ordered, starts)]
+
+
+def parse_header(prefix: bytes) -> BloscHeader:
+    """Parse a Blosc-1 header and its block-offset table from a frame prefix."""
+    if len(prefix) < _HEADER:
+        raise UnsupportedFrameError("truncated blosc header")
+    version, versionlz, flags, typesize = prefix[0], prefix[1], prefix[2], prefix[3]
+    nbytes, blocksize, cbytes = struct.unpack("<iii", prefix[4:16])
+    _check_frame(version, flags, nbytes, blocksize)
     nblocks = -(-nbytes // blocksize)
     need = _HEADER + 4 * nblocks
     if len(prefix) < need:
         raise UnsupportedFrameError(f"prefix too short: need {need} bytes")
-    starts = np.frombuffer(prefix[_HEADER:need], dtype="<i4").astype(np.int64)
-    ordered = np.sort(starts)
-    if np.any(np.diff(ordered) <= 0) or ordered[0] < need or ordered[-1] >= cbytes:
-        raise UnsupportedFrameError("inconsistent block offsets")
-    # a block ends where the physically next block starts (or at cbytes)
-    following = np.append(ordered[1:], cbytes)
-    ends = following[np.searchsorted(ordered, starts)]
+    starts, ends = _block_spans(prefix[_HEADER:need], need, cbytes)
     return BloscHeader(version, versionlz, flags, typesize, nbytes, blocksize, cbytes, starts, ends)
 
 

@@ -7,7 +7,7 @@ import asyncio
 import httpx
 import numpy as np
 
-from supertraj_met.openmeteo import _AsyncHttp, _gather
+from supertraj_met.openmeteo import PagedAsyncFS, gather_tiles
 from supertraj_met.store import TransferStats
 
 BLOB = bytes(range(256)) * 64  # 16 KiB object
@@ -28,7 +28,7 @@ def test_small_reads_are_served_from_shared_pages() -> None:
     calls: list[str] = []
 
     async def run() -> list[bytes]:
-        fs = _AsyncHttp("https://x.example", TransferStats(), 8, page_size=4096)
+        fs = PagedAsyncFS("https://x.example", TransferStats(), 8, page_size=4096)
         fs.client = httpx.AsyncClient(transport=_handler(calls))
         reads = [fs._cat_file("f.om", s, s + 100) for s in range(0, 8000, 200)]
         reads.append(fs._cat_file("f.om", 4000, 4200))  # straddles two pages
@@ -53,5 +53,5 @@ def test_gather_reassembles_tiles_across_boundaries() -> None:
     }
     rows = np.array([9, 5, 3, 2])
     cols = np.array([10, 11, 0, 1, 7])  # wraps around like a global grid
-    out = _gather(tiles, rows, cols, tp, t_in=2)
+    out = gather_tiles(tiles, rows, cols, tp, t_in=2)
     np.testing.assert_array_equal(out, full[np.ix_(rows, cols)][..., 2])

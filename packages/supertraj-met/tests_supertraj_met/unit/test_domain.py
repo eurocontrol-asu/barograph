@@ -60,3 +60,23 @@ def test_cube_serves_only_narrower_requests(make_cube: Callable[..., Cube]) -> N
     assert not cube.serves(inner, (19000.0, 29000.0), 1)
     assert not cube.serves(inner, (21000.0, 29000.0), 2)
     assert not cube.serves(Domain(41.0, 49.0, 9.0, 11.0), (21000.0, 29000.0), 1)
+
+
+@pytest.mark.parametrize(("lon_min", "lon_max"), [(10.0, 5.0), (0.0, 400.0)])
+def test_invalid_longitude_ranges_are_rejected(lon_min: float, lon_max: float) -> None:
+    with pytest.raises(ValueError, match="longitude"):
+        Domain(0.0, 1.0, lon_min, lon_max)
+
+
+def test_points_spanning_the_globe_get_the_whole_longitude_range() -> None:
+    d = Domain.from_points([0.0, 0.0, 0.0], [0.0, 120.0, 240.0], margin=100.0)
+    assert (d.lon_min, d.lon_max) == (-180.0, 180.0)
+    with pytest.raises(ValueError, match="no points"):
+        Domain.from_points([], [])
+
+
+def test_enclosing_domains() -> None:
+    outer = Domain(40.0, 50.0, 350.0, 370.0)
+    assert outer.encloses(Domain(41.0, 49.0, -5.0, 5.0))
+    assert not outer.encloses(Domain(41.0, 49.0, 5.0, 15.0))
+    assert Domain.whole_globe().encloses(Domain(-10.0, 10.0, 100.0, 200.0))

@@ -19,9 +19,18 @@ from importlib import resources
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-__all__ = ["STANDARD_SURFACE_PRESSURE", "VerticalCoordinate", "model_levels", "pressure_levels"]
+__all__ = [
+    "MIN_LEVELS",
+    "N_MODEL_LEVELS",
+    "STANDARD_SURFACE_PRESSURE",
+    "VerticalCoordinate",
+    "model_levels",
+    "pressure_levels",
+]
 
 STANDARD_SURFACE_PRESSURE = 101325.0
+N_MODEL_LEVELS = 137  # ERA5 / IFS L137
+MIN_LEVELS = 2  # vertical interpolation needs a bracketing pair
 
 
 @dataclass(frozen=True)
@@ -42,6 +51,7 @@ class VerticalCoordinate:
 
     @property
     def needs_surface_pressure(self) -> bool:
+        """True for hybrid levels (pressures depend on the surface pressure)."""
         return bool(np.any(self.b != 0.0))
 
     def pressure(self, ps: ArrayLike) -> NDArray[np.float64]:
@@ -50,6 +60,7 @@ class VerticalCoordinate:
         return self.a + self.b * ps_arr
 
     def subset(self, positions: ArrayLike) -> VerticalCoordinate:
+        """The levels at ``positions``."""
         pos = np.asarray(positions, dtype=np.int64)
         return VerticalCoordinate(self.kind, self.ids[pos], self.a[pos], self.b[pos])
 
@@ -93,7 +104,7 @@ def model_levels(ids: ArrayLike | None = None) -> VerticalCoordinate:
     if ids is None:
         return coord
     sel = np.asarray(ids, dtype=np.int64)
-    if np.any((sel < 1) | (sel > 137)) or np.any(np.diff(sel) <= 0):
+    if np.any((sel < 1) | (sel > N_MODEL_LEVELS)) or np.any(np.diff(sel) <= 0):
         raise ValueError("model level ids must be strictly increasing within 1..137")
     return coord.subset(sel - 1)
 

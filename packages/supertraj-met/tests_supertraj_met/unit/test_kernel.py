@@ -4,11 +4,11 @@ from collections.abc import Callable
 
 import numpy as np
 import pytest
-from synthetic import surface_pressure, truth
 
 from supertraj_met.domain import Cube
-from supertraj_met.kernel import Flag, sample, track_components
+from supertraj_met.kernel import Flag, SampleOptions, sample, track_components
 from supertraj_met.vertical import pressure_levels
+from synthetic import surface_pressure, truth
 
 
 def _points(n: int = 500) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -38,7 +38,7 @@ def test_standard_surface_pressure_biases_low_levels_only(make_cube: Callable[..
     lon = np.array([9.0, 9.0])  # ps ~ 96.8 kPa, far from standard
     p = np.array([25000.0, 85000.0])
     actual, _ = sample(cube, lat, lon, p)
-    standard, _ = sample(cube, lat, lon, p, surface_pressure="standard")
+    standard, _ = sample(cube, lat, lon, p, SampleOptions(surface_pressure="standard"))
     err = np.abs(standard["t"] - actual["t"])
     assert err[1] > 3 * err[0] > 0.1  # ~0.45 K at 250 hPa vs ~1.9 K at 850 hPa
 
@@ -81,7 +81,7 @@ def test_pressure_levels_cube_is_supported(make_cube: Callable[..., Cube]) -> No
         [np.full((len(ml.lat), len(ml.lon)), v, dtype=np.float32) for v in (1.0, 2.0, 3.0)]
     )
     pl = Cube(ml.source, ml.hour, ml.lat, ml.lon, pressure_levels([200, 250, 300]), {"x": layers})
-    values, flags = sample(pl, [45.0], [1.0], [np.sqrt(20000.0 * 25000.0)], vertical="log")
+    values, flags = sample(pl, [45.0], [1.0], [np.sqrt(20000.0 * 25000.0)], SampleOptions())
     assert flags[0] == Flag.OK
     assert values["x"][0] == pytest.approx(1.5)
 

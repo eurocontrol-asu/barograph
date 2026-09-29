@@ -43,6 +43,9 @@ __all__ = ["ArcoEra5", "Arpege"]
 
 ERA5_FEATURES = ["u_component_of_wind", "v_component_of_wind", "temperature", "specific_humidity"]
 ARPEGE_FEATURES = ["u", "v", "t", "r"]
+# FastMeteo selects the ARCO store by its number of levels
+_PRESSURE_LEVEL_STORE = 37
+_MODEL_LEVEL_STORE = 137
 
 
 class _FrameEnricher:
@@ -79,7 +82,7 @@ class _FrameEnricher:
 class ArcoEra5(_FrameEnricher):
     """ERA5 from ARCO: ``model_levels=37`` (pressure levels) or ``137`` (model levels)."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - same signature as fastmeteo.source.ArcoEra5
         self,
         local_store: str | None = None,
         model_levels: Literal[37, 137] = 37,
@@ -95,14 +98,14 @@ class ArcoEra5(_FrameEnricher):
         self.features = list(features or ERA5_FEATURES)
         self.flags_column = flags_column
         fields = {f: f for f in self.features}
-        if model_levels == 37:
+        if model_levels == _PRESSURE_LEVEL_STORE:
             source: Source = arco_pressure_levels(
                 levels=FASTMETEO_LEVELS_22 if levels is None else levels,
                 fields=fields,
                 base_url=base_url,
             )
             default_vertical: VerticalMethod = "linear"  # FastMeteo interpolates linearly in p
-        elif model_levels == 137:
+        elif model_levels == _MODEL_LEVEL_STORE:
             source = arco_model_levels(levels=levels, fields=fields, base_url=base_url)
             default_vertical = "log"
         else:
@@ -115,7 +118,7 @@ class ArcoEra5(_FrameEnricher):
 class Arpege(_FrameEnricher):
     """Météo-France ARPEGE forecasts (0.25 deg global 3-hourly, or 0.1 deg Europe hourly)."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913, PLR0917 - same signature as fastmeteo.source.Arpege
         self,
         local_store: str | None = None,
         levels: Sequence[int] | None = None,

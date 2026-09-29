@@ -17,6 +17,7 @@ import time
 from collections.abc import Callable, Sequence
 from concurrent.futures import Executor
 from dataclasses import dataclass, field
+from http import HTTPStatus
 from pathlib import Path
 from typing import Any, Protocol
 from urllib.parse import unquote
@@ -65,16 +66,19 @@ class TransferStats:
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
     def add(self, nbytes: int, seconds: float) -> None:
+        """Account for one request of ``nbytes`` bytes taking ``seconds``."""
         with self._lock:
             self.requests += 1
             self.bytes += nbytes
             self.seconds += seconds
 
     def throttle(self) -> None:
+        """Account for one 429/5xx answer."""
         with self._lock:
             self.throttled += 1
 
     def snapshot(self) -> dict[str, float]:
+        """Current counters as a dict."""
         with self._lock:
             return {
                 "requests": self.requests,
@@ -89,7 +93,9 @@ class ByteStore(Protocol):
 
     stats: TransferStats
 
-    def get(self, key: str, start: int | None = None, stop: int | None = None) -> bytes: ...
+    def get(self, key: str, start: int | None = None, stop: int | None = None) -> bytes:
+        """Object bytes, or the ``[start, stop)`` range of them."""
+        ...
 
     def size(self, key: str) -> int:
         """Object size in bytes; raises :class:`MissingChunkError` if absent."""
@@ -99,7 +105,7 @@ class ByteStore(Protocol):
 class HttpStore:
     """Anonymous HTTP(S) access (honours ``HTTPS_PROXY``), with retries."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - keyword-only HTTP client settings
         self,
         base_url: str,
         *,
@@ -133,31 +139,41 @@ class HttpStore:
             self._base = final[: -len(key) - 1]
 
     def get(self, key: str, start: int | None = None, stop: int | None = None) -> bytes:
+        """Object bytes, or the ``[start, stop)`` range of them."""
         headers = {}
         if start is not None:
             headers["Range"] = f"bytes={start}-" + ("" if stop is None else str(stop - 1))
+        t0 = time.perf_counter()
+        resp = self._request("GET", key, headers)
+        if start is not None and resp.status_code != HTTPStatus.PARTIAL_CONTENT:
+            raise RuntimeError(f"server ignored the range request for {key}")
+        self.stats.add(len(resp.content), time.perf_counter() - t0)
+        return resp.content
+
+    def size(self, key: str) -> int:
+        """Object size in bytes (HEAD request)."""
+        return int(self._request("HEAD", key, {}).headers["content-length"])
+
+    def _request(self, method: str, key: str, headers: dict[str, str]) -> httpx.Response:
+        """One request with retries: transport errors and 429/5xx back off, 404 raises."""
         for attempt in range(self.retries + 1):
             url = self._url(key)
-            t0 = time.perf_counter()
             try:
                 with slot(url):
-                    resp = self.client.get(url, headers=headers)
+                    resp = self.client.request(method, url, headers=headers)
             except httpx.TransportError:
                 if attempt == self.retries:
                     raise
                 time.sleep(self.backoff * 2**attempt)
                 continue
-            if resp.status_code == 404:
+            if resp.status_code == HTTPStatus.NOT_FOUND:
                 raise MissingChunkError(key)
             if resp.status_code in _RETRY_STATUS and attempt < self.retries:
                 self._pushed_back(resp, url, attempt)
                 continue
             resp.raise_for_status()
-            if start is not None and resp.status_code != 206:
-                raise RuntimeError(f"server ignored the range request for {key}")
             self._learn_redirect(resp, key)
-            self.stats.add(len(resp.content), time.perf_counter() - t0)
-            return resp.content
+            return resp
         raise RuntimeError("unreachable")  # pragma: no cover
 
     def _pushed_back(self, resp: httpx.Response, url: str, attempt: int) -> None:
@@ -170,27 +186,6 @@ class HttpStore:
         delay = float(retry_after) if retry_after.isdigit() else self.backoff * 2**attempt
         time.sleep(min(delay, 60.0))
 
-    def size(self, key: str) -> int:
-        for attempt in range(self.retries + 1):
-            url = self._url(key)
-            try:
-                with slot(url):
-                    resp = self.client.head(url)
-            except httpx.TransportError:
-                if attempt == self.retries:
-                    raise
-                time.sleep(self.backoff * 2**attempt)
-                continue
-            if resp.status_code == 404:
-                raise MissingChunkError(key)
-            if resp.status_code in _RETRY_STATUS and attempt < self.retries:
-                self._pushed_back(resp, url, attempt)
-                continue
-            resp.raise_for_status()
-            self._learn_redirect(resp, key)
-            return int(resp.headers["content-length"])
-        raise RuntimeError("unreachable")  # pragma: no cover
-
 
 class FileStore:
     """Local directory store (tests, mirrored stores)."""
@@ -200,6 +195,7 @@ class FileStore:
         self.stats = TransferStats()
 
     def get(self, key: str, start: int | None = None, stop: int | None = None) -> bytes:
+        """Object bytes, or the ``[start, stop)`` range of them."""
         path = self.root / key
         t0 = time.perf_counter()
         try:
@@ -215,6 +211,7 @@ class FileStore:
         return data
 
     def size(self, key: str) -> int:
+        """Object size in bytes."""
         try:
             return (self.root / key).stat().st_size
         except FileNotFoundError as exc:
@@ -223,6 +220,8 @@ class FileStore:
 
 @dataclass(frozen=True)
 class ArrayMeta:
+    """Metadata of one zarr-v2 array."""
+
     name: str
     shape: tuple[int, ...]
     chunks: tuple[int, ...]
@@ -234,10 +233,12 @@ class ArrayMeta:
     attrs: dict[str, Any]
 
     def chunk_key(self, index: Sequence[int]) -> str:
+        """Store key of the chunk at ``index``."""
         return f"{self.name}/" + self.separator.join(str(i) for i in index)
 
     @property
     def fill(self) -> float:
+        """Fill value as a float (NaN when unset)."""
         return float("nan") if self.fill_value is None else float(self.fill_value)
 
 
@@ -266,6 +267,7 @@ class ZarrStore:
         return dict(self._meta.get(".zattrs", {}))
 
     def array(self, name: str) -> ArrayMeta:
+        """Metadata of array ``name``."""
         try:
             za = self._meta[f"{name}/.zarray"]
         except KeyError as exc:
@@ -289,6 +291,7 @@ class ZarrStore:
 
     # -- whole-array reads (coordinates) ------------------------------------------------
     def read_1d(self, name: str, start: int = 0, stop: int | None = None) -> NDArray[Any]:
+        """Values ``[start, stop)`` of a 1-D array (e.g. a coordinate)."""
         meta = self.array(name)
         if len(meta.shape) != 1:
             raise ValueError(f"{name} is not 1-D")

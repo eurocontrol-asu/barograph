@@ -41,3 +41,36 @@ def test_missing_objects_raise() -> None:
     store = HttpStore(TARGET, client=httpx.Client(transport=_transport(), follow_redirects=True))
     with pytest.raises(MissingChunkError):
         store.get("missing/object")
+
+
+def test_server_errors_are_retried_and_counted() -> None:
+    answers = iter([httpx.Response(503), httpx.Response(200, content=b"ok")])
+    client = httpx.Client(transport=httpx.MockTransport(lambda _r: next(answers)))
+    store = HttpStore("https://busy.example", client=client, backoff=0.0)
+    assert store.get("k") == b"ok" and store.stats.snapshot()["throttled"] == 1
+
+
+def test_transport_errors_are_retried_then_raised() -> None:
+    calls = {"n": 0}
+
+    def flaky(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        raise httpx.ConnectError("down", request=request)
+
+    store = HttpStore(
+        "https://down.example",
+        client=httpx.Client(transport=httpx.MockTransport(flaky)),
+        retries=2,
+        backoff=0.0,
+    )
+    with pytest.raises(httpx.ConnectError):
+        store.get("k")
+    assert calls["n"] == 3
+
+
+def test_ignored_range_request_is_an_error() -> None:
+    client = httpx.Client(
+        transport=httpx.MockTransport(lambda _r: httpx.Response(200, content=b"x"))
+    )
+    with pytest.raises(RuntimeError, match="ignored the range"):
+        HttpStore("https://x.example", client=client).get("k", 0, 1)

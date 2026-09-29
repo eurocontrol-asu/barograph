@@ -4,11 +4,11 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from synthetic import EPOCH, truth, write_stores
 
 from supertraj_met import Enricher, Flag, GridSource, model_levels
 from supertraj_met.sources import SurfacePressure
 from supertraj_met.store import FileStore, ZarrStore
+from synthetic import EPOCH, truth, write_stores
 
 pytestmark = pytest.mark.integration
 

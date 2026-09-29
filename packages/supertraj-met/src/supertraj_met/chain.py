@@ -28,6 +28,8 @@ __all__ = ["SourceChain"]
 
 
 class SourceChain:
+    """Sources of the same fields, tried in order for each interval."""
+
     def __init__(self, *sources: Source) -> None:
         if not sources:
             raise ValueError("a chain needs at least one source")
@@ -48,9 +50,11 @@ class SourceChain:
 
     @property
     def stats(self) -> list[TransferStats]:
+        """Transfer counters of every chained source."""
         return [st for s in self.sources for st in s.stats]
 
     def coverage(self) -> tuple[np.datetime64, np.datetime64] | None:
+        """Union of the chained sources' periods."""
         spans = [c for s in self.sources if (c := s.coverage()) is not None]
         if not spans:
             return None
@@ -65,6 +69,7 @@ class SourceChain:
         return bool(check(t0)) if callable(check) else True
 
     def cube_keys(self, t0: np.datetime64) -> tuple[CubeKey, CubeKey]:
+        """Keys of the first source serving ``[t0, t0 + step)``, tagged with its id."""
         t0h = np.datetime64(t0, "h")
         chosen = next((s for s in self.sources if self._serves(s, t0h)), self.sources[-1])
         k0, k1 = chosen.cube_keys(t0h)
@@ -79,6 +84,7 @@ class SourceChain:
         level_margin: int = 1,
         executor: Executor | None = None,
     ) -> Cube:
+        """Fetch from the source the key was routed to."""
         if key.source is None or key.source not in self._by_id:
             raise DataUnavailableError(f"cube key {key} is not routed to a chained source")
         return self._by_id[key.source].fetch(

@@ -15,7 +15,12 @@ from numpy.typing import ArrayLike, NDArray
 from supertraj_met.base import CubeKey
 from supertraj_met.vertical import VerticalCoordinate
 
-__all__ = ["Cube", "Domain", "GridIndex"]
+__all__ = ["FULL_TURN", "Cube", "Domain", "GridIndex"]
+
+FULL_TURN = 360.0  # degrees of longitude
+LAT_LIMIT = 90.0
+_PERIODIC_TOLERANCE = 1e-6
+_MIN_GRID_POINTS = 2
 
 
 @dataclass(frozen=True)
@@ -28,9 +33,9 @@ class Domain:
     lon_max: float
 
     def __post_init__(self) -> None:
-        if not (-90.0 <= self.lat_min <= self.lat_max <= 90.0):
+        if not (-LAT_LIMIT <= self.lat_min <= self.lat_max <= LAT_LIMIT):
             raise ValueError(f"invalid latitude range {self.lat_min}..{self.lat_max}")
-        if not (0.0 <= self.lon_max - self.lon_min <= 360.0):
+        if not (0.0 <= self.lon_max - self.lon_min <= FULL_TURN):
             raise ValueError(f"invalid longitude range {self.lon_min}..{self.lon_max}")
 
     @classmethod
@@ -46,9 +51,9 @@ class Domain:
             span = (float(framed.min()), float(framed.max()))
             if best is None or span[1] - span[0] < best[1] - best[0]:
                 best = span
-        assert best is not None  # noqa: S101 - loop always runs
+        assert best is not None
         lon_min, lon_max = best[0] - margin, best[1] + margin
-        if lon_max - lon_min > 360.0:
+        if lon_max - lon_min > FULL_TURN:
             lon_min, lon_max = -180.0, 180.0
         return cls(
             max(float(la.min()) - margin, -90.0),
@@ -58,17 +63,19 @@ class Domain:
         )
 
     def to_json(self) -> dict[str, float]:
+        """Bounds as a JSON-friendly dict."""
         return {k: getattr(self, k) for k in ("lat_min", "lat_max", "lon_min", "lon_max")}
 
     @classmethod
     def whole_globe(cls) -> Domain:
+        """The domain covering the entire globe."""
         return cls(-90.0, 90.0, 0.0, 360.0)
 
     def encloses(self, other: Domain) -> bool:
         """True if ``other`` lies inside this box (longitudes compared modulo 360)."""
         if not (self.lat_min <= other.lat_min and other.lat_max <= self.lat_max):
             return False
-        if self.lon_max - self.lon_min >= 360.0:
+        if self.lon_max - self.lon_min >= FULL_TURN:
             return True
         start = self.lon_min + (other.lon_min - self.lon_min) % 360.0
         return start + (other.lon_max - other.lon_min) <= self.lon_max
@@ -92,6 +99,7 @@ class GridIndex:
     def locate(
         cls, domain: Domain, grid_lat: NDArray[np.float64], grid_lon: NDArray[np.float64]
     ) -> GridIndex:
+        """Rows, columns and coordinates of ``domain`` in a regular grid."""
         dlat = float(grid_lat[1] - grid_lat[0])
         dlon = float(grid_lon[1] - grid_lon[0])
         if dlat >= 0 or dlon <= 0:
@@ -101,7 +109,7 @@ class GridIndex:
         i1 = int(np.ceil((domain.lat_min - grid_lat[0]) / dlat - 1e-9))
         i0, i1 = max(i0, 0), min(max(i1, i0 + 1), nlat - 1)
         i0 = min(i0, i1 - 1)
-        periodic = abs(nlon * dlon - 360.0) < 1e-6
+        periodic = abs(nlon * dlon - FULL_TURN) < _PERIODIC_TOLERANCE
         lon0 = float(grid_lon[0])
         # periodic: keep the caller's framing (columns wrap); regional: express the
         # domain start in the grid frame [lon0, lon0 + 360)
@@ -143,6 +151,7 @@ class Cube:
 
     @property
     def key(self) -> CubeKey:
+        """Cache key (validity time and run) of this cube."""
         return CubeKey(np.datetime64(self.hour, "h"), self.run)
 
     def __post_init__(self) -> None:
@@ -152,11 +161,12 @@ class Cube:
                 raise ValueError(f"field {name} has shape {arr.shape}, expected {shape}")
         if self.ps is not None and self.ps.shape != shape[1:]:
             raise ValueError("surface pressure grid does not match the fields")
-        if len(self.lat) < 2 or len(self.lon) < 2:
+        if len(self.lat) < _MIN_GRID_POINTS or len(self.lon) < _MIN_GRID_POINTS:
             raise ValueError("a cube needs at least 2x2 grid points")
 
     @property
     def nbytes(self) -> int:
+        """Memory held by the fields and surface pressure."""
         total = sum(a.nbytes for a in self.fields.values())
         return total + (0 if self.ps is None else self.ps.nbytes)
 
@@ -168,12 +178,14 @@ class Cube:
         return bool(lat_ok and start + (domain.lon_max - domain.lon_min) <= self.lon[-1])
 
     def surface_pressure_range(self) -> tuple[float, float] | None:
+        """Minimum and maximum surface pressure (Pa), if known."""
         if self.ps is None or not np.isfinite(self.ps).any():
             return None
         return float(np.nanmin(self.ps)), float(np.nanmax(self.ps))
 
     # -- persistence -----------------------------------------------------------------------
     def manifest(self) -> dict[str, Any]:
+        """JSON description written next to the cached arrays."""
         return {
             "source": self.source,
             "hour": str(self.hour),
@@ -208,6 +220,7 @@ class Cube:
 
     @classmethod
     def load(cls, path: Path) -> Cube:
+        """Read a cube written by :meth:`save`."""
         manifest = json.loads(path.with_suffix(".json").read_text())
         with np.load(path) as z:
             fields = {k.removeprefix("field_"): z[k] for k in z.files if k.startswith("field_")}

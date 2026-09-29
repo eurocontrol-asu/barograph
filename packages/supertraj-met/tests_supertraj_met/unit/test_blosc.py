@@ -64,3 +64,37 @@ def test_truncated_offsets_table_is_rejected() -> None:
     frame, _ = _frame()
     with pytest.raises(UnsupportedFrameError, match="prefix too short"):
         parse_header(frame[:20])
+
+
+def _raw_header(
+    version: int = 2, flags: int = 0x01, nbytes: int = 1024, blocksize: int = 512
+) -> bytes:
+    import struct
+
+    return struct.pack("<BBBBiii", version, 1, flags, 4, nbytes, blocksize, 64)
+
+
+@pytest.mark.parametrize(
+    ("header", "match"),
+    [
+        (_raw_header(version=3), "version"),
+        (_raw_header(flags=0x05), "extended"),
+        (_raw_header(blocksize=0), "invalid"),
+    ],
+)
+def test_frames_that_cannot_be_split_are_rejected(header: bytes, match: str) -> None:
+    with pytest.raises(UnsupportedFrameError, match=match):
+        parse_header(header + b"\x00" * 64)
+
+
+def test_truncated_header_is_rejected() -> None:
+    with pytest.raises(UnsupportedFrameError, match="truncated"):
+        parse_header(_raw_header()[:10])
+
+
+def test_inconsistent_block_offsets_are_rejected() -> None:
+    import struct
+
+    offsets = struct.pack("<ii", 40, 40)  # two blocks starting at the same offset
+    with pytest.raises(UnsupportedFrameError, match="offsets"):
+        parse_header(_raw_header() + offsets)

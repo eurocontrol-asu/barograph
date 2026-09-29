@@ -1,18 +1,19 @@
-[build-system]
-requires = ["hatchling", "hatch-vcs"]
-build-backend = "hatchling.build"
-
 [project]
 name = "supertraj-met"
 dynamic = ["version"]
 description = "Fast weather retrieval along aircraft trajectories: ERA5 model/pressure levels, ARPEGE, Open-Meteo archives"
 readme = "README.md"
+license = "EUPL-1.2"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
-license = { text = "Apache-2.0" }
-authors = [{ name = "gjarry", email = "jarry.gabriel@gmail.com" }]
+authors = [{ name = "Gabriel Jarry", email = "jarry.gabriel@gmail.com" }]
+keywords = ["aviation", "ads-b", "era5", "arpege", "weather", "trajectory"]
 classifiers = [
     "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: European Union Public Licence 1.2 (EUPL 1.2)",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Atmospheric Science",
     "Typing :: Typed",
 ]
@@ -27,10 +28,193 @@ grib = ["eccodes>=2.38", "eccodeslib>=2.38"]
 pandas = ["pandas>=2.0"]
 openmeteo = ["omfiles>=1.2"]
 
+[project.urls]
+Homepage = "https://github.com/asu-eurocontrol/supertraj"
+Documentation = "https://asu-eurocontrol.github.io/supertraj/met/"
+Repository = "https://github.com/asu-eurocontrol/supertraj.git"
+Issues = "https://github.com/asu-eurocontrol/supertraj/issues"
+
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
 [tool.hatch.version]
 source = "vcs"
+tag-pattern = "supertraj-met/v(?P<version>.*)"
+raw-options = { root = "../..", git_describe_command = "git describe --dirty --tags --long --match supertraj-met/v*" }
 fallback-version = "0.1.0.dev0"
-raw-options = { root = "../.." }
+
+[tool.hatch.build.hooks.vcs]
+version-file = "src/supertraj_met/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/supertraj_met"]
+
+[tool.axm-audit.mirror]
+# base.py: the Source protocol and CubeKey, exercised by every source's tests;
+# compat.py: FastMeteo-compatible façade over Enricher, covered by integration tests.
+exempt_paths = ["_version.py", "**/__init__.py", "base.py", "compat.py"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-xdist>=3.8.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.16.9",
+    "mypy>=2.3.1",
+    "prek>=0.5.4",
+    "pip-audit>=2.10.1",
+    "pandas-stubs>=2.0",
+    # optional backends exercised by the test suite
+    "pandas>=2.0",
+    "eccodes>=2.38",
+    "eccodeslib>=2.38",
+    "omfiles>=1.2",
+]
+docs = [
+    "mkdocs-material>=9.0",
+    "mkdocstrings[python]>=1.0.3",
+    "mkdocs-gen-files>=0.5",
+    "mkdocs-literate-nav>=0.6.3",
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Ruff Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+[tool.ruff]
+extend-exclude = ["*.md"]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests_supertraj_met"]
+exclude = ["*/_version.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "BLE", "C4", "C901", "PLR", "S", "T20", "RUF"]
+ignore = ["S101"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests_supertraj_met/*" = ["S101", "S105", "S106", "S108", "PLR2004"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-args = 5
+max-branches = 12
+max-returns = 6
+max-statements = 50
+max-locals = 15
+
+[tool.ruff.lint.isort]
+known-first-party = ["supertraj_met"]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MyPy Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+[tool.mypy]
+python_version = "3.12"
+strict = true
+pretty = true
+warn_return_any = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+module = ["tests_supertraj_met.*"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+
+[[tool.mypy.overrides]]
+module = ["numcodecs", "numcodecs.*", "eccodes", "eccodes.*", "omfiles", "omfiles.*"]
+ignore_missing_imports = true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Pytest Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+testpaths = ["tests_supertraj_met"]
+pythonpath = ["src", "tests_supertraj_met"]
+python_files = "test_*.py"
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--strict-config",
+    "--tb=short",
+    "--import-mode=importlib",
+    "-m",
+    "not live",
+    "--cov=src/supertraj_met",
+    "--cov-report=term-missing",
+    "--cov-report=xml",
+    "--cov-fail-under=90",
+]
+filterwarnings = ["error"]
+markers = [
+    "integration: real I/O against local stores or mirrors",
+    "e2e: end-to-end subprocess tests",
+    "live: downloads from public buckets (opt-in: -m live)",
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Coverage Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+[tool.coverage.run]
+source = ["src/supertraj_met"]
+branch = true
+relative_files = true
+omit = ["*/tests_*/*", "*/_version.py"]
+
+[tool.coverage.xml]
+output = "coverage.xml"
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "^\\s*\\.\\.\\.$",  # Protocol method stubs
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Git-Cliff Changelog Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+[tool.git-cliff.changelog]
+header = """
+# Changelog
+
+All notable changes to this project will be documented in this file.
+"""
+body = """
+{% if version %}\
+    ## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+    ## [Unreleased]
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+    ### {{ group | striptags | trim | upper_first }}
+    {% for commit in commits %}
+        - {{ commit.message | upper_first }}\
+    {% endfor %}
+{% endfor %}
+"""
+trim = true
+
+[tool.git-cliff.git]
+conventional_commits = true
+filter_unconventional = true
+commit_parsers = [
+    { message = "^chore", skip = true },
+    { message = "^ci", skip = true },
+    { message = "^feat", group = "🚀 Features" },
+    { message = "^fix", group = "🐛 Bug Fixes" },
+    { message = "^doc", group = "📚 Documentation" },
+    { message = "^perf", group = "⚡ Performance" },
+    { message = "^refactor", group = "🔧 Refactor" },
+    { message = "^test", group = "🧪 Tests" },
+]
+tag_pattern = "supertraj-met/v[0-9].*"
+include_path = "packages/supertraj-met/**"
