@@ -1,0 +1,40 @@
+name: Publish Docs
+
+# Manual only while the repository is private: a Pages site built from a
+# private repository is PUBLIC on most GitHub plans. Re-enable the push trigger
+# (branches: [main], docs paths) once publication has been approved.
+on:
+  workflow_dispatch:
+
+# GitHub Pages is deployed from a build artifact, which leaves the gh-pages
+# branch free for the quality badges published by axm-quality.yml.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v7
+      - run: uv sync --all-packages --group docs
+      - run: uv run mkdocs build --strict
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

@@ -1,0 +1,70 @@
+name: Publish to PyPI
+
+on:
+  push:
+    # Long tag convention: the prefix is the package directory
+    # (supertraj-met/v0.1.0 -> packages/supertraj-met), so a new package
+    # needs no CI change — only a tag.
+    tags:
+      - "*/v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build (dry run, nothing is published)"
+        required: true
+
+jobs:
+  detect-package:
+    name: Detect Package
+    runs-on: ubuntu-latest
+    outputs:
+      package: ${{ steps.detect.outputs.package }}
+      package-dir: ${{ steps.detect.outputs.package-dir }}
+      publishable: ${{ steps.detect.outputs.publishable }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: detect
+        uses: ./.github/actions/detect-package
+        with:
+          tag: ${{ inputs.tag }}
+
+  test:
+    name: Run Tests (${{ needs.detect-package.outputs.package }})
+    needs: detect-package
+    runs-on: ubuntu-latest
+    if: >-
+      needs.detect-package.outputs.publishable == 'true'
+      && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v7
+      - run: uv python install 3.12
+      - run: uv sync --all-packages --all-groups
+      - run: uv run --package ${{ needs.detect-package.outputs.package }} --directory ${{ needs.detect-package.outputs.package-dir }} pytest --no-cov
+
+  publish:
+    name: Build and Publish (${{ needs.detect-package.outputs.package }})
+    runs-on: ubuntu-latest
+    needs: [detect-package, test]
+    # Two gates: the package must not be private, and the run must come from
+    # a real tag push. A workflow_dispatch builds the artefact and stops.
+    if: >-
+      needs.detect-package.outputs.publishable == 'true'
+      && github.event_name == 'push'
+    environment:
+      name: pypi
+      url: https://pypi.org/project/${{ needs.detect-package.outputs.package }}/
+    # Trusted Publishing (OIDC): no token stored in the repository.
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v7
+      - run: uv python install 3.12
+      - run: uv build --package ${{ needs.detect-package.outputs.package }}
+      - uses: pypa/gh-action-pypi-publish@release/v1

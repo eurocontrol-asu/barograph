@@ -1,0 +1,223 @@
+name: axm-quality
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+# Prefer the newest full snapshot; publication also checks the current main SHA.
+concurrency:
+  group: axm-quality-main
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Detect workspace packages
+    runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.matrix.outputs.packages }}
+      all: ${{ steps.matrix.outputs.all }}
+      any: ${{ steps.matrix.outputs.any }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/workspace-matrix
+        id: matrix
+
+  badges:
+    name: Badges ${{ matrix.package.name }}
+    runs-on: ubuntu-latest
+    needs: changes
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(needs.changes.outputs.all) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v7
+      - run: uv python install 3.12
+      - run: uv sync --all-packages --all-groups
+      - run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Define badge helpers
+        run: |
+          cp assets/logo.svg /tmp/audit-logo.svg
+          cp /tmp/audit-logo.svg /tmp/init-logo.svg || true
+
+
+      - name: Test + audit + init check (${{ matrix.package.name }})
+        env:
+          PKG: ${{ matrix.package.name }}
+          PKG_DIR: ${{ matrix.package.path }}
+        run: |
+          source "$GITHUB_WORKSPACE/.github/scripts/badge-helpers.sh"
+          mkdir -p _publish/badges/$PKG \
+                   _publish/reports/coverage \
+                   _publish/reports/axm-audit \
+                   _publish/reports/axm-init
+
+          # ── coverage ──────────────────────────────────────────────────
+          echo "📦 Testing $PKG..."
+          uv run --package "$PKG" --directory "$PKG_DIR" \
+            pytest --cov --cov-report=json:"$GITHUB_WORKSPACE/_publish/reports/coverage/$PKG.json" \
+            --no-cov-on-fail -q 2>&1 || true
+
+          COV_FILE="_publish/reports/coverage/$PKG.json"
+          if [ -f "$COV_FILE" ]; then
+            COV=$(jq '.totals.percent_covered_display' "$COV_FILE" | tr -d '"')
+          else
+            COV=0
+          fi
+
+          # ── axm-audit ─────────────────────────────────────────────────
+          RESULT=$(uv run axm audit "$PKG_DIR" --json-output) || true
+          echo "$RESULT" > "_publish/reports/axm-audit/$PKG.json"
+          # Guard: empty / malformed RESULT or non-numeric .score -> explicit
+          # error/red badge + exit 1 (fails the job), never a bogus "%"/red badge.
+          require_valid_result "$RESULT" "_publish/badges/$PKG" "axm-audit" "axm-audit"
+          SCORE=$(echo "$RESULT" | jq '.score')
+          GRADE=$(echo "$RESULT" | jq -r '.grade')
+          echo "📋 $PKG: Score $SCORE/100 — Grade $GRADE — Coverage ${COV}%"
+
+          write_badge "_publish/badges/$PKG" "axm-audit" "axm-audit" "$SCORE" /tmp/audit-logo.svg
+          write_badge "_publish/badges/$PKG" "coverage" "coverage" "$COV"
+
+          # ── axm-init ──────────────────────────────────────────────────
+          IRESULT=$(uv run axm init_check "$PKG_DIR" --json-output) || true
+          echo "$IRESULT" > "_publish/reports/axm-init/$PKG.json"
+          require_valid_result "$IRESULT" "_publish/badges/$PKG" "axm-init" "axm-init"
+          ISCORE=$(echo "$IRESULT" | jq '.score')
+          write_badge "_publish/badges/$PKG" "axm-init" "axm-init" "$ISCORE" /tmp/init-logo.svg
+
+      - name: Upload package badges + reports
+        uses: actions/upload-artifact@v7
+        with:
+          name: badges-${{ matrix.package.name }}
+          path: _publish/
+          retention-days: 1
+
+  # One complete snapshot: no reuse of stale or removed member reports.
+  publish:
+    name: Aggregate + publish
+    runs-on: ubuntu-latest
+    needs: [changes, badges]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v7
+      - run: uv python install 3.12
+      - run: uv sync --all-packages --all-groups
+      - run: echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Define badge helpers
+        run: |
+          cp assets/logo.svg /tmp/audit-logo.svg
+          cp /tmp/audit-logo.svg /tmp/init-logo.svg || true
+
+      - name: Download this run's package artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: badges-*
+          path: _artifacts
+          merge-multiple: true
+
+      - name: Assemble complete snapshot
+        run: |
+          mkdir -p _publish
+          cp -r _artifacts/. _publish/
+          rm -rf _artifacts
+
+      # axm-init also scores the workspace ROOT (not a package) — always fresh.
+      - name: Init check (workspace root)
+        run: |
+          source "$GITHUB_WORKSPACE/.github/scripts/badge-helpers.sh"
+          mkdir -p _publish/reports/axm-init
+          RESULT=$(uv run axm init_check . --json-output) || true
+          echo "$RESULT" > _publish/reports/axm-init/root.json
+
+      # Aggregate precisely the discovered member set from this run.
+      - name: Recompute aggregate badges
+        id: agg
+        env:
+          MEMBERS: ${{ needs.changes.outputs.all }}
+        run: |
+          source "$GITHUB_WORKSPACE/.github/scripts/badge-helpers.sh"
+          mkdir -p _publish/badges
+
+
+          TOTAL_SCORE=0; TOTAL_COV=0; TOTAL_INIT=0
+          AUDIT_COUNT=0; COV_COUNT=0; INIT_COUNT=0
+
+          while IFS= read -r PKG; do
+            AUD="_publish/reports/axm-audit/$PKG.json"
+            require_valid_result "$(cat "$AUD")" "_publish/badges" "axm-audit" "axm-audit"
+            if [ -f "$AUD" ]; then
+              S=$(jq '.score // empty' "$AUD")
+              if [ -n "$S" ]; then
+                TOTAL_SCORE=$(python3 -c "print(float($TOTAL_SCORE) + float($S))")
+                AUDIT_COUNT=$((AUDIT_COUNT + 1))
+              fi
+            fi
+            COV_COUNT=$((COV_COUNT + 1))
+            COVF="_publish/reports/coverage/$PKG.json"
+            if [ -f "$COVF" ]; then
+              C=$(jq '.totals.percent_covered_display' "$COVF" | tr -d '"')
+              TOTAL_COV=$(python3 -c "print(round($TOTAL_COV + float('${C:-0}'), 1))")
+            fi
+            INITF="_publish/reports/axm-init/$PKG.json"
+            require_valid_result "$(cat "$INITF")" "_publish/badges" "axm-init" "axm-init"
+            if [ -f "$INITF" ]; then
+              I=$(jq '.score // empty' "$INITF")
+              if [ -n "$I" ]; then
+                TOTAL_INIT=$(python3 -c "print(float($TOTAL_INIT) + float($I))")
+                INIT_COUNT=$((INIT_COUNT + 1))
+              fi
+            fi
+          done < <(jq -r '.[].name' <<< "$MEMBERS")
+
+          AVG_SCORE=$(python3 -c "print(round($TOTAL_SCORE / max($AUDIT_COUNT,1)))")
+          AVG_COV=$(python3 -c "print(round($TOTAL_COV / max($COV_COUNT,1)))")
+          AVG_INIT=$(python3 -c "print(round($TOTAL_INIT / max($INIT_COUNT,1)))")
+
+          jq -n --argjson score "$AVG_SCORE" --argjson coverage "$AVG_COV" --argjson count "$AUDIT_COUNT" \
+            '{score: $score, coverage: $coverage, members: $count}' \
+            > _publish/reports/axm-audit/summary.json
+          jq -n --argjson score "$AVG_INIT" --argjson count "$INIT_COUNT" \
+            '{score: $score, members: $count}' \
+            > _publish/reports/axm-init/summary.json
+
+          write_badge "_publish/badges" "axm-audit" "axm-audit" "$AVG_SCORE" /tmp/audit-logo.svg
+          write_badge "_publish/badges" "coverage" "coverage" "$AVG_COV"
+          write_badge "_publish/badges" "axm-init" "axm-init" "$AVG_INIT" /tmp/init-logo.svg
+
+          echo "score=$AVG_SCORE" >> "$GITHUB_OUTPUT"
+          echo "coverage=$AVG_COV" >> "$GITHUB_OUTPUT"
+          echo "init=$AVG_INIT" >> "$GITHUB_OUTPUT"
+          echo "📊 Aggregate: audit $AVG_SCORE/100 — coverage ${AVG_COV}% — init $AVG_INIT/100 (over $AUDIT_COUNT pkgs)"
+
+      - name: Check snapshot is still current
+        id: current
+        run: |
+          LATEST=$(git ls-remote origin refs/heads/main | cut -f1)
+          if [ "$LATEST" = "$GITHUB_SHA" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Skipping superseded snapshot $GITHUB_SHA (main is $LATEST)"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push badges and reports to gh-pages
+        if: steps.current.outputs.publish == 'true'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: ./_publish
+          keep_files: false
+          commit_message: "ci: audit=${{ steps.agg.outputs.score }} cov=${{ steps.agg.outputs.coverage }}% init=${{ steps.agg.outputs.init }}"

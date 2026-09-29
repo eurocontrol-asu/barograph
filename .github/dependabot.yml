@@ -1,0 +1,46 @@
+version: 2
+updates:
+  # Workspace root: the single shared uv.lock, one consolidated weekly PR.
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      all-dependencies:
+        patterns:
+          - "*"
+
+  # Published package: its own declared constraints are the PyPI contract.
+  # ruff/mypy/pytest/prek are pinned once in the root [tool.uv]
+  # constraint-dependencies; a member floor above the pin would make the
+  # workspace unsolvable, so they are bumped by hand at the root.
+  - package-ecosystem: uv
+    directory: /packages/supertraj-met
+    schedule:
+      interval: weekly
+    groups:
+      supertraj-met:
+        patterns:
+          - "*"
+    ignore:
+      - dependency-name: ruff
+      - dependency-name: mypy
+      - dependency-name: pytest
+      - dependency-name: prek
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+
+  # ruff's hook rev must stay equal to the root constraint: bumped by hand.
+  - package-ecosystem: pre-commit
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      pre-commit-hooks:
+        patterns:
+          - "*"
+    ignore:
+      - dependency-name: https://github.com/astral-sh/ruff-pre-commit

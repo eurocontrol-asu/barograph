@@ -1,0 +1,42 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "*/v*"
+
+# Creating a Release writes to the repository: stated, not inherited.
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Generate Changelog & Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect package from tag
+        id: detect
+        uses: ./.github/actions/detect-package
+
+      - name: Generate changelog
+        uses: orhun/git-cliff-action@v4
+        id: git-cliff
+        with:
+          config: ${{ steps.detect.outputs.package-dir }}/pyproject.toml
+          args: >-
+            --latest
+            --strip header
+            --tag-pattern '${{ steps.detect.outputs.package }}/v*'
+            --include-path '${{ steps.detect.outputs.package-dir }}/**'
+        env:
+          OUTPUT: CHANGELOG.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          body: ${{ steps.git-cliff.outputs.content }}
+          token: ${{ secrets.GITHUB_TOKEN }}
