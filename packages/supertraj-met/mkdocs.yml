@@ -1,0 +1,63 @@
+site_name: met
+docs_dir: docs
+
+theme:
+  name: material
+
+plugins:
+  - search
+  - gen-files:
+      scripts:
+        - docs/gen_ref_pages.py
+  - literate-nav:
+      nav_file: SUMMARY.md
+  - mkdocstrings:
+      handlers:
+        python:
+          paths:
+            - src
+          options:
+            docstring_style: numpy
+            show_source: true
+            show_root_heading: true
+
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+  links:
+    not_found: warn
+    unrecognized_links: warn
+    anchors: warn
+
+markdown_extensions:
+  - admonition
+  - tables
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+nav:
+  - Overview: index.md
+  - Tutorials:
+    - Getting Started: tutorials/getting-started.md
+  - How-To Guides:
+    - howto/index.md
+    - ERA5 (model or pressure levels): howto/era5.md
+    - ARPEGE, live and archive: howto/arpege.md
+    - FastMeteo-compatible façade: howto/fastmeteo.md
+    - Campaigns, cache and parallelism: howto/campaigns.md
+  - Reference:
+    - Flags and statistics: reference/flags.md
+    - Public Python API: reference/api/index.md
+    - Internal Module Reference: reference/
+  - Explanation:
+    - Architecture: explanation/architecture.md
+    - Vertical interpolation: explanation/vertical.md
+    - Data access: explanation/data-access.md
+    - Benchmarks: explanation/benchmarks.md
+
+exclude_docs: |
+  gen_ref_pages.py

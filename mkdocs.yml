@@ -1,0 +1,90 @@
+site_name: supertraj
+site_description: Weather along aircraft trajectories — fast ERA5 and ARPEGE retrieval at aircraft positions.
+site_url: https://asu-eurocontrol.github.io/supertraj/
+repo_url: https://github.com/asu-eurocontrol/supertraj
+repo_name: asu-eurocontrol/supertraj
+copyright: Copyright &copy; 2026 Gabriel Jarry — EUPL-1.2
+
+theme:
+  name: material
+  logo: assets/logo.svg
+  favicon: assets/logo.svg
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: blue
+      accent: light blue
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue
+      accent: light blue
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.path
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+  icon:
+    repo: fontawesome/brands/github
+
+nav:
+  - Home:
+    - index.md
+  - Packages:
+    - packages/index.md
+    - supertraj-met: '!include ./packages/supertraj-met/mkdocs.yml'
+  - Contributing:
+    - contributing.md
+    - Module Reference: reference/index.md
+
+plugins:
+  - monorepo
+  - search
+  - autorefs:
+      resolve_closest: true
+  - gen-files:
+      scripts:
+        - docs/gen_ref_pages.py
+  - literate-nav:
+      nav_file: SUMMARY.md
+  - mkdocstrings:
+      handlers:
+        python:
+          paths:
+            - packages/supertraj-met/src
+          options:
+            docstring_style: numpy
+            show_root_heading: true
+            show_root_full_path: false
+            heading_level: 3
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+
+exclude_docs: |
+  gen_ref_pages.py
