@@ -31,6 +31,33 @@ information to aircraft trajectories (ADS-B, flight data).
 pip install 'barograph-met[grib,pandas,openmeteo]'
 ```
 
+## Benchmarks
+
+Same points for every tool, cold cache (first run), through a corporate HTTPS
+proxy. Gains are reference ÷ barograph-met.
+
+| Case | Reference | Time | Downloaded | Peak RAM | Values vs reference |
+|---|---|---:|---:|---:|---|
+| ERA5, 22 pressure levels | FastMeteo 1.2.0 | 214 s → **12 s** (×18) | 1 296 → **100 MB** (×13) | 1.5 → **0.16 GB** | identical (≤ 1e-13), except FastMeteo's extrapolated points at the Greenwich seam |
+| ERA5, 137 model levels | pycontrails 0.63.5 | 322 s → **31 s** (×10) | 4 736 → **349 MB** (×14) | 7.0 → **0.22 GB** | RMS 0.03 m/s (u, v), 0.016 K (T) |
+| ARPEGE 0.1°, official (14 days) | FastMeteo 1.2.0 | 67 s → **13 s** (×5) | 475 → **54 MB** (×9) | — | identical east of Greenwich; FastMeteo extrapolates west of it |
+
+Warm runs (second call, tool's own cache) take 0.2–2 s for every tool.
+ERA5 cases: one 2 h flight from the surface to FL350 (1 764 points, 4 hourly
+analyses). ARPEGE case: a 3 h flight across France (400 points). Network time
+is over 98 % of the cold time: the gain comes from reading only the levels and
+latitude bands the flight crosses instead of whole global fields.
+
+| Coverage | FastMeteo | pycontrails | barograph-met |
+|---|:---:|:---:|:---:|
+| ERA5 pressure levels | 22 of 37 | 37 | 37 |
+| ERA5 model levels (L137) | — | via 61 PL | direct, actual surface pressure |
+| ARPEGE official (last 14 days) | ✓ | — | ✓ |
+| ARPEGE archive (since Dec 2023, Open-Meteo) | — | — | ✓, chained with the official feed |
+| Points outside the data | extrapolated | NaN | flagged |
+
+Details in the [benchmark notes](https://github.com/eurocontrol-asu/barograph/blob/main/packages/barograph-met/docs/explanation/benchmarks.md).
+
 ## Development
 
 ```bash
