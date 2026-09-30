@@ -81,3 +81,15 @@ def test_tiles_and_immutable_chunks(mirror: Path, tmp_path: Path) -> None:
         assert src.reader.disk is not None and src.reader.disk.cacheable("x/chunk_0.om")
         assert not src.reader.disk.cacheable("x/chunk_99999999.om")  # still being rewritten
         assert not src.reader.disk.cacheable("data/model/static/meta.json")
+
+
+def test_tiles_of_recent_chunks_are_read_again_after_a_while(
+    mirror: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    time, lat, lon, p, _ = _flight(2.0, 6.0)
+    with OpenMeteoSource(OM_MODEL, base_url=str(mirror)) as src:
+        src.reader.final = lambda _path: False  # pretend the chunks are still rewritten
+        Enricher(src).enrich(time, lat, lon, pressure_pa=p)
+        assert Enricher(src).enrich(time, lat, lon, pressure_pa=p).stats["bytes"] == 0
+        monkeypatch.setattr("baro.met.openmeteo.REVALIDATE_S", 0.0)
+        assert Enricher(src).enrich(time, lat, lon, pressure_pa=p).stats["bytes"] > 0

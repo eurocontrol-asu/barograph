@@ -25,9 +25,10 @@ from baro.met.limits import async_slot
 from baro.met.rangecache import RangeCache, namespace_for
 from baro.met.store import TransferStats
 
-__all__ = ["DiskPages", "LocalAsyncFS", "PagedAsyncFS"]
+__all__ = ["REVALIDATE_S", "DiskPages", "LocalAsyncFS", "PagedAsyncFS"]
 
 _ATTEMPTS = 5
+REVALIDATE_S = 300.0  # how long a mutable file's size/version is trusted in memory
 _RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
 _log = logging.getLogger("baro.met.http")
 
@@ -41,6 +42,10 @@ class PagedAsyncFS:
     (a page holds several whole latitude rows); concurrent requests for the
     same page share one download. This trades a few extra bytes for ~50x fewer
     round trips, which dominate the cost.
+
+    Files for which ``immutable(path)`` is false may be rewritten upstream:
+    their version (size and ETag) is re-checked after :data:`REVALIDATE_S`
+    seconds and pages are keyed by it, so a read never mixes two versions.
     """
 
     def __init__(
@@ -59,9 +64,10 @@ class PagedAsyncFS:
             follow_redirects=True,
             limits=httpx.Limits(max_connections=max_connections),
         )
-        self._pages: OrderedDict[tuple[str, int], bytes] = OrderedDict()
-        self._inflight: dict[tuple[str, int], asyncio.Future[bytes]] = {}
-        self._sizes: dict[str, int] = {}
+        self._pages: OrderedDict[tuple[str, str, int], bytes] = OrderedDict()
+        self._inflight: dict[tuple[str, str, int], asyncio.Future[bytes]] = {}
+        self._versions: dict[str, tuple[int, str, float]] = {}  # size, tag, checked at
+        self.immutable: Callable[[str], bool] = lambda _path: False
         self._bytes = 0
         self._limit = int(cache_mb * 1e6)
         self.disk: DiskPages | None = None  # immutable pages also kept on disk
@@ -83,7 +89,9 @@ class PagedAsyncFS:
                 _log.warning(
                     "HTTP %s from %s (attempt %d), backing off", resp.status_code, url, attempt + 1
                 )
-                await asyncio.sleep(0.5 * 2**attempt)
+                retry_after = resp.headers.get("retry-after", "")
+                delay = float(retry_after) if retry_after.isdigit() else 0.5 * 2**attempt
+                await asyncio.sleep(min(delay, 60.0))
                 continue
             if resp.status_code == HTTPStatus.NOT_FOUND:
                 raise FileNotFoundError(path)
@@ -92,8 +100,8 @@ class PagedAsyncFS:
             return resp
         raise RuntimeError("unreachable")  # pragma: no cover
 
-    async def _page(self, path: str, index: int) -> bytes:
-        key = (path, index)
+    async def _page(self, path: str, tag: str, index: int, size: int) -> bytes:
+        key = (path, tag, index)
         if key in self._pages:
             self._pages.move_to_end(key)
             return self._pages[key]
@@ -102,7 +110,7 @@ class PagedAsyncFS:
         future: asyncio.Future[bytes] = asyncio.get_running_loop().create_future()
         self._inflight[key] = future
         try:
-            data = await self._load(path, index)
+            data = await self._load(path, index, size)
             self._remember(key, data)
             future.set_result(data)
             return data
@@ -112,9 +120,8 @@ class PagedAsyncFS:
         finally:
             del self._inflight[key]
 
-    async def _load(self, path: str, index: int) -> bytes:
+    async def _load(self, path: str, index: int, size: int) -> bytes:
         """Page ``index`` of ``path``: from disk if kept there, else downloaded (and kept)."""
-        size = await self._size(path)
         start = index * self.page_size
         stop = min(start + self.page_size, size)
         disk = self.disk if self.disk is not None and self.disk.cacheable(path) else None
@@ -122,11 +129,16 @@ class PagedAsyncFS:
         if data is None:
             resp = await self._request("GET", path, {"Range": f"bytes={start}-{stop - 1}"})
             data = resp.content
+            if resp.status_code != HTTPStatus.PARTIAL_CONTENT or len(data) != stop - start:
+                raise RuntimeError(
+                    f"{path}: asked for bytes {start}-{stop - 1}, got HTTP "
+                    f"{resp.status_code} with {len(data)} bytes (range ignored or file changed)"
+                )
             if disk is not None:
                 disk.cache.put(disk.namespace, path, start, data)
         return data
 
-    def _remember(self, key: tuple[str, int], data: bytes) -> None:
+    def _remember(self, key: tuple[str, str, int], data: bytes) -> None:
         """Keep a page in memory, evicting the least recently used beyond the limit."""
         self._pages[key] = data
         self._bytes += len(data)
@@ -137,20 +149,32 @@ class PagedAsyncFS:
     async def _cat_file(
         self, path: str, start: int | None = None, end: int | None = None, **_: Any
     ) -> bytes:
-        size = await self._size(path)
+        size, tag = await self._version(path)
         start = 0 if start is None else start
         end = size if end is None else min(end, size)
         first, last = start // self.page_size, max(end - 1, start) // self.page_size
-        pages = await asyncio.gather(*(self._page(path, i) for i in range(first, last + 1)))
+        pages = await asyncio.gather(
+            *(self._page(path, tag, i, size) for i in range(first, last + 1))
+        )
         blob = b"".join(pages)
         offset = first * self.page_size
         return blob[start - offset : end - offset]
 
     async def _size(self, path: str, **_: Any) -> int:
-        if path not in self._sizes:
-            resp = await self._request("HEAD", path, {})
-            self._sizes[path] = int(resp.headers["content-length"])
-        return self._sizes[path]
+        return (await self._version(path))[0]
+
+    async def _version(self, path: str) -> tuple[int, str]:
+        """Size and version tag of ``path``; re-checked after a while unless immutable."""
+        known = self._versions.get(path)
+        if known is not None and (
+            self.immutable(path) or time.monotonic() - known[2] < REVALIDATE_S
+        ):
+            return known[0], known[1]
+        resp = await self._request("HEAD", path, {})
+        size = int(resp.headers["content-length"])
+        tag = resp.headers.get("etag") or resp.headers.get("last-modified") or str(size)
+        self._versions[path] = (size, tag, time.monotonic())
+        return size, tag
 
     async def aclose(self) -> None:
         """Close the HTTP connection pool."""

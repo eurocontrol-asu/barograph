@@ -28,7 +28,7 @@ import re
 import threading
 import time
 from collections import OrderedDict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from concurrent.futures import Executor
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -37,7 +37,7 @@ import httpx
 import numpy as np
 from numpy.typing import NDArray
 
-from baro.met.asyncfs import DiskPages, LocalAsyncFS, PagedAsyncFS
+from baro.met.asyncfs import REVALIDATE_S, DiskPages, LocalAsyncFS, PagedAsyncFS
 from baro.met.base import CubeKey, DataUnavailableError
 from baro.met.domain import Cube, Domain, GridIndex
 from baro.met.limits import run_async
@@ -193,6 +193,9 @@ class TileReader:
         self._lock = threading.Lock()
         self._fs: PagedAsyncFS | LocalAsyncFS | None = None
         self.disk: DiskPages | None = None
+        # files no later run can rewrite; tiles of the others are re-read after a while
+        self.final: Callable[[str], bool] = lambda _path: False
+        self._cached_at: dict[TileKey, float] = {}
 
     def _filesystem(self) -> PagedAsyncFS | LocalAsyncFS:
         if self._fs is None:  # only touched from the shared I/O loop thread
@@ -204,6 +207,7 @@ class TileReader:
             )
         if isinstance(self._fs, PagedAsyncFS):
             self._fs.disk = self.disk
+            self._fs.immutable = self.final
         return self._fs
 
     def close(self) -> None:
@@ -255,7 +259,7 @@ class TileReader:
             for variable, hpa in wanted:
                 for tile in tiles:
                     key = (variable, hpa, chunk, tile)
-                    if key in self._cache:
+                    if key in self._cache and self._fresh(key):
                         self._cache.move_to_end(key)
                         out[(variable, hpa)][tile] = self._cache[key]
                     else:
@@ -268,12 +272,23 @@ class TileReader:
                     self._remember(key, arr)
         return out
 
+    def _fresh(self, key: TileKey) -> bool:
+        """A cached tile is usable if its file is final or it was read recently."""
+        if self.final(self.catalog.path(key[0], key[1], key[2])):
+            return True
+        return time.monotonic() - self._cached_at.get(key, -np.inf) < REVALIDATE_S
+
     def _remember(self, key: TileKey, arr: NDArray[np.float32]) -> None:
+        old = self._cache.pop(key, None)
+        if old is not None:
+            self._cache_bytes -= old.nbytes
         self._cache[key] = arr
+        self._cached_at[key] = time.monotonic()
         self._cache_bytes += arr.nbytes
         while self._cache_bytes > self._cache_limit and len(self._cache) > 1:
-            _, old = self._cache.popitem(last=False)
+            evicted, old = self._cache.popitem(last=False)
             self._cache_bytes -= old.nbytes
+            self._cached_at.pop(evicted, None)
 
     async def _read_shape(self, path: str) -> tuple[int, int]:
         omfiles = _omfiles()
@@ -394,6 +409,7 @@ class OpenMeteoSource:
         self.catalog = ArchiveCatalog(base_url, model, variables, self._stats)
         self.levels = self.catalog.common_levels(levels)
         self.reader = TileReader(self.catalog, self._stats, tile_deg, cache_mb)
+        self.reader.final = self._final_path
         self._probe = (variables[0], self.levels[-1])  # a file that always exists
 
     def __enter__(self) -> OpenMeteoSource:
