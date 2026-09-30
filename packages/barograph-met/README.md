@@ -129,6 +129,27 @@ uv run --package barograph-met --directory packages/barograph-met pytest -m live
 make lint
 ```
 
+## Legal and usage
+
+> [!IMPORTANT]
+> **Research use only.** This software is provided for research purposes and
+> is not a regulatory or operational tool; EUROCONTROL disclaims any
+> responsibility for misuse or operational application.
+
+## Data sources and licences
+
+barograph-met redistributes no data: it reads the providers' public stores on
+your behalf, and what you download stays under their terms. Credit them in
+work that uses the values:
+
+| Source | Licence and attribution |
+|---|---|
+| ERA5 (Copernicus Climate Change Service, ECMWF) | Copernicus licence: *"Contains modified Copernicus Climate Change Service information [year]. Neither the European Commission nor ECMWF is responsible for any use that may be made of the Copernicus information or data it contains."* Cite Hersbach et al. (2020), [doi:10.1002/qj.3803](https://doi.org/10.1002/qj.3803). |
+| ARCO-ERA5 (Google Research, Google Cloud public datasets) | Same ERA5 terms; cite Carver & Merose (2023), [ARCO-ERA5](https://github.com/google-research/arco-era5). |
+| Météo-France ARPEGE open data | [Licence Ouverte / Open Licence 2.0 (Etalab)](https://www.etalab.gouv.fr/licence-ouverte-open-licence/): credit *"Source: Météo-France"*. |
+| Open-Meteo archive | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/): credit *"Weather data by Open-Meteo.com"* and the model's producer (Météo-France for ARPEGE). |
+| OpenSky Network (benchmark flights only) | Cite Schäfer et al. (2014), *Bringing up OpenSky*, IPSN; see the [OpenSky terms of use](https://opensky-network.org/about/terms-of-use). |
+
 ## License
 
-[EUPL-1.2](LICENSE).
+[EUPL-1.2](LICENSE) — © 2026 Eurocontrol

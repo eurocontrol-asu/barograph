@@ -2,11 +2,11 @@
 name = "barograph-workspace"
 version = "0.0.0"
 requires-python = ">=3.12"
-description = "barograph workspace — enrich aircraft trajectories: weather, gap filling, flight-data views"
+description = "barograph workspace — enrich aircraft trajectories, starting with weather at full model resolution"
 license = "EUPL-1.2"
 license-files = ["LICENSE"]
 readme = "README.md"
-authors = [{ name = "Gabriel Jarry", email = "jarry.gabriel@gmail.com" }]
+authors = [{ name = "Gabriel Jarry", email = "gabriel.jarry@eurocontrol.int" }]
 keywords = ["aviation", "ads-b", "era5", "arpege", "weather", "trajectory"]
 classifiers = [
     "Development Status :: 3 - Alpha",
