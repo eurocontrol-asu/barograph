@@ -100,3 +100,14 @@ def test_cached_messages_are_never_downloaded_again(mirror: Path, tmp_path: Path
     assert source.tiling(r2_key := source.cube_keys(time[0])[0]) is None and r2_key.run
     assert r1.stats["bytes"] > 0 and r2.stats["bytes"] == 0 and r2.stats["cache_bytes"] > 0
     np.testing.assert_array_equal(r1["u"], r2["u"])
+
+
+def test_a_flight_entering_across_the_western_edge_keeps_every_point(mirror: Path) -> None:
+    n = 200
+    time = ARPEGE_RUN + (np.linspace(65, 235, n) * 60).astype("timedelta64[s]")
+    lat = np.linspace(46.0, 47.0, n)
+    lon = np.linspace(-31.8, 5.0, n)  # starts 0.2 deg inside the grid's western edge
+    src = ArpegeSource(resolution="01", base_url=str(mirror))
+    for mode in ("flight", "global"):
+        res = Enricher(src, mode=mode).enrich(time, lat, lon, pressure_pa=np.full(n, 30000.0))
+        assert np.all(res.flags == Flag.OK), mode
