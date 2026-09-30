@@ -44,6 +44,27 @@ at the Greenwich seam; versus pycontrails RMS 0.037 m/s (u, v) and 0.021 K (T),
 99th percentile 0.15 m/s and 0.08 K. Points below the lowest level or with
 invalid altitudes (0.8 %) are flagged rather than extrapolated.
 
+ARPEGE 0.25° global, official Météo-France files: 1 000 flights of
+28 September 2026 sampled the same way (577 000 points), 00 UTC run (FastMeteo's
+only full-day mode, one 000H024H file; FastMeteo 1.2.0 cannot reach the new
+data.gouv.fr host, so it runs from the branch of
+[fastmeteo#5](https://github.com/open-aviation/fastmeteo/pull/5)):
+
+| Flights | FastMeteo | barograph-met |
+|---:|---:|---:|
+| 1 | 236 s, 2.6 GB | **95 s, 0.20 GB** |
+| 10 | 318 s, 2.6 GB | **128 s, 0.84 GB** |
+| 100 | 411 s, 2.6 GB | **175 s, 1.2 GB** |
+| 1 000 | 504 s, 2.6 GB | **211 s, 1.25 GB** |
+| Peak RAM | 13 GB | **2.1 GB** |
+
+barograph-met fetches only the GRIB messages (variable × level × step) the
+flights need, and its first call includes indexing the files (cached after).
+With FastMeteo's 22 levels the values are identical (|Δ| ≤ 3e-8 over 574 673
+points); by default barograph-met also uses the 275 and 925 hPa levels
+FastMeteo drops, which moves the values by 0.23 m/s and 0.12 K RMS.
+
+
 Protocol: flights in a fixed random order (seed 0), each step enriching only
 the flights added since the previous one with a persistent cache, as a
 campaign grows; pycontrails' pressure levels are fixed once for the fleet's
