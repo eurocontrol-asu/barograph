@@ -26,9 +26,10 @@ enricher = Enricher(arco_model_levels(), cache_dir="/shared/era5-cache")
   preliminary ERA5T may still be replaced), ARPEGE files of a published run,
   Open-Meteo chunks older than a week (recent hours are rewritten by newer
   runs). Store metadata is always re-read.
-- Extents are written atomically and never modified; a lock per unit of work
-  lets several processes share the cache without downloading the same bytes
-  twice.
+- Extents are written atomically and never modified; missing ranges are
+  fetched under file locks on the 1 MiB windows they cover, so threads and
+  processes sharing the cache never download the same bytes twice, while
+  disjoint reads stay parallel.
 - A fixed `domain=` still forces one box per time slice, and `mode="global"`
   reads whole fields on every level (FastMeteo-like cost).
 

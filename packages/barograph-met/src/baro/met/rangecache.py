@@ -11,10 +11,13 @@ Layout: ``root/<namespace>/<xx>/<digest>/`` per object, holding one file per
 cached extent (``<start>-<stop>.bin``), a ``size`` file once the end of the
 object is known, and ``key.txt`` (the object key, for humans). Extent files are
 written atomically (temporary file + rename) and never modified, so readers
-never see a partial extent and concurrent writers are harmless (at worst a
-range is fetched twice in a race). :meth:`RangeCache.claim` serialises the
-fetches of one unit of work across threads and processes when callers want to
-avoid even that.
+never see a partial extent.
+
+Missing ranges are fetched under ``flock`` locks on the 1 MiB windows they
+cover (lock files live in the object's folder), taken in order, across
+threads and processes; once the locks are held the cache is checked again. A
+range read by several readers at once is therefore downloaded once, while
+disjoint reads of one object (e.g. the levels of an ERA5 chunk) stay parallel.
 
 Only immutable objects may be cached: each source says which of its keys are
 (e.g. ERA5 chunks once final, ARPEGE files of a published run, Open-Meteo
@@ -30,7 +33,7 @@ import re
 import tempfile
 import threading
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -39,6 +42,7 @@ from baro.met.store import ByteStore, TransferStats
 __all__ = ["CacheStats", "CachedStore", "RangeCache", "cover", "namespace_for"]
 
 _EXTENT = re.compile(r"(\d+)-(\d+)\.bin")
+_WINDOW = 1 << 20  # lock granularity for concurrent fetches
 
 type Fetch = Callable[[int, int], bytes]
 
@@ -84,15 +88,37 @@ class RangeCache:
         the object, and the result is then truncated there like a range read.
         """
         folder = self.object_dir(namespace, key)
+        data = self._cached(folder, start, stop)
+        if data is not None:
+            return data
+        windows = range(start // _WINDOW, (max(stop, start + 1) - 1) // _WINDOW + 1)
+        with _locked(folder, [f"w{w}" for w in windows]):
+            data = self._cached(folder, start, stop)  # fetched meanwhile by another reader
+            if data is not None:
+                return data
+            return self._fill(folder, key, start, stop, fetch)
+
+    def _cached(self, folder: Path, start: int, stop: int) -> bytes | None:
+        """Bytes ``[start, stop)`` if they are all on disk, else ``None``."""
         size = _read_size(folder)
         if size is not None:
             stop = min(stop, size)
         if stop <= start:
             return b""
-        extents = _extents(folder)
+        pieces = cover(_extents(folder), start, stop)
+        if any(path is None for _, _, path in pieces):
+            return None
+        self.stats.add(hit=stop - start)
+        return b"".join(_read_slice(p, a, b) for a, b, p in pieces if p is not None)
+
+    def _fill(self, folder: Path, key: str, start: int, stop: int, fetch: Fetch) -> bytes:
+        """Serve ``[start, stop)`` from disk and ``fetch``, keeping what was fetched."""
+        size = _read_size(folder)
+        if size is not None:
+            stop = min(stop, size)
         pieces: list[bytes] = []
         hit = 0
-        for a, b, path in cover(extents, start, stop):
+        for a, b, path in cover(_extents(folder), start, stop):
             if path is not None:
                 pieces.append(_read_slice(path, a, b))
                 hit += b - a
@@ -107,12 +133,12 @@ class RangeCache:
         return b"".join(pieces)
 
     def lookup(self, namespace: str, key: str, start: int, stop: int) -> bytes | None:
-        """Bytes ``[start, stop)`` of ``key`` if they are all on disk, else ``None``."""
-        pieces = cover(_extents(self.object_dir(namespace, key)), start, stop)
-        if any(path is None for _, _, path in pieces):
-            return None
-        self.stats.add(hit=stop - start)
-        return b"".join(_read_slice(p, a, b) for a, b, p in pieces if p is not None)
+        """Bytes ``[start, stop)`` of ``key`` if they are all on disk, else ``None``.
+
+        For callers that deduplicate their own concurrent fetches (the
+        Open-Meteo page reader); they keep what they fetched with :meth:`put`.
+        """
+        return self._cached(self.object_dir(namespace, key), start, stop)
 
     def put(self, namespace: str, key: str, start: int, data: bytes) -> None:
         """Keep ``data``, the bytes of ``key`` from ``start`` on."""
@@ -121,34 +147,22 @@ class RangeCache:
     def get_full(self, namespace: str, key: str, fetch_all: Callable[[], bytes]) -> bytes:
         """The whole object ``key``, fetched once."""
         folder = self.object_dir(namespace, key)
+        data = self._whole(folder)
+        if data is not None:
+            return data
+        with _locked(folder, ["full"]):
+            data = self._whole(folder)
+            if data is not None:
+                return data
+            data = fetch_all()
+            self._store(folder, key, 0, data)
+            _write_atomic(folder / "size", str(len(data)).encode())
+            return data
+
+    def _whole(self, folder: Path) -> bytes | None:
+        """The whole object if its size is known and all its bytes are on disk."""
         size = _read_size(folder)
-        if size is not None:
-            cached = cover(_extents(folder), 0, size)
-            if all(path is not None for _, _, path in cached):
-                self.stats.add(hit=size)
-                return b"".join(_read_slice(p, a, b) for a, b, p in cached if p is not None)
-        data = fetch_all()
-        self._store(folder, key, 0, data)
-        _write_atomic(folder / "size", str(len(data)).encode())
-        return data
-
-    # -- claims ------------------------------------------------------------------------------
-    @contextmanager
-    def claim(self, token: str) -> Iterator[None]:
-        """Exclusive claim on a unit of work, across threads *and* processes.
-
-        While one caller fetches, others asking for the same ``token`` wait,
-        then find the bytes on disk. Implemented with ``flock`` (POSIX).
-        """
-        digest = hashlib.sha256(token.encode()).hexdigest()[:24]
-        folder = self.root / ".claims"
-        folder.mkdir(parents=True, exist_ok=True)
-        with open(folder / digest, "a+b") as fh:
-            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+        return None if size is None else self._cached(folder, 0, size)
 
     # -- writes ------------------------------------------------------------------------------
     def _store(self, folder: Path, key: str, start: int, data: bytes) -> None:
@@ -208,6 +222,18 @@ def namespace_for(location: str) -> str:
 
 
 # -- helpers --------------------------------------------------------------------------------
+@contextmanager
+def _locked(folder: Path, names: list[str]) -> Iterator[None]:
+    """Hold ``flock`` locks on ``folder/.lock-<name>`` for every name, taken in order."""
+    folder.mkdir(parents=True, exist_ok=True)
+    with ExitStack() as stack:
+        for name in sorted(names):
+            fh = stack.enter_context(open(folder / f".lock-{name}", "a+b"))
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+            stack.callback(fcntl.flock, fh.fileno(), fcntl.LOCK_UN)
+        yield
+
+
 def _extents(folder: Path) -> list[tuple[int, int, Path]]:
     """Cached extents of an object, sorted by start."""
     try:

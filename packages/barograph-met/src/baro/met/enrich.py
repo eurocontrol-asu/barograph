@@ -75,7 +75,6 @@ class _CubeRequest:
     key: CubeKey
     domain: Domain
     p_range: tuple[float, float]
-    token: str  # claim token: one per time slice (all its groups share bytes at their edges)
 
 
 @dataclass(frozen=True)
@@ -375,8 +374,7 @@ class Enricher:
     ) -> _CubeRequest:
         """Request for the cube ``key`` over the region and pressures of some points."""
         domain = self.domain or Domain.from_points(lat, lon, self.margin_deg)
-        src = key.source or self.source.source_id
-        return _CubeRequest(key, domain, (float(p.min()), float(p.max())), f"{src}|{key}")
+        return _CubeRequest(key, domain, (float(p.min()), float(p.max())))
 
     def _stream(
         self,
@@ -390,22 +388,12 @@ class Enricher:
 
         def fetch(req: int) -> Future[Cube | None]:
             """Submit the download of one cube."""
-            return pool.submit(self._get_cube, requests[req], io, counters)
+            return pool.submit(self._download, requests[req], io, counters)
 
         ahead = _Prefetcher(intervals, fetch, self.prefetch)
         for iv in intervals:
             yield iv, ahead.cubes(iv)
             ahead.release(iv)
-
-    def _get_cube(
-        self, req: _CubeRequest, io: ThreadPoolExecutor, counters: dict[str, Any]
-    ) -> Cube | None:
-        if self.cache is None:
-            return self._download(req, io, counters)
-        # one claim per time slice, across threads and processes: whoever comes second
-        # (another group of the same hour, another process) reads the bytes from disk
-        with self.cache.claim(req.token):
-            return self._download(req, io, counters)
 
     def _download(
         self, req: _CubeRequest, io: ThreadPoolExecutor, counters: dict[str, Any]

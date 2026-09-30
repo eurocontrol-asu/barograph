@@ -53,8 +53,6 @@ def test_processes_share_the_cache_without_duplicate_downloads(tmp_path: Path) -
     (alone,) = _run(ml, pl, tmp_path / "alone", 1)
     pair = _run(ml, pl, tmp_path / "shared", 2)
     assert all(o["ok"] == 200 for o in [alone, *pair])
-    # only tiny metadata reads made before any claim may race (time axis, header probe)
-    overhead = (ml / "time" / "0").stat().st_size + 4096
-    assert alone["bytes"] <= sum(o["bytes"] for o in pair) <= alone["bytes"] + 2 * overhead
+    assert sum(o["bytes"] for o in pair) == alone["bytes"]  # every byte once in total
     (later,) = _run(ml, pl, tmp_path / "shared", 1)
     assert later["bytes"] == 0

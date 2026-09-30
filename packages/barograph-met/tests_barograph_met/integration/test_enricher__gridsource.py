@@ -106,10 +106,7 @@ def test_concurrent_enrichers_download_each_byte_once(
     reference = run(tmp_path / "alone")["bytes"]
     with ThreadPoolExecutor(4) as ex:
         stats = list(ex.map(run, [tmp_path / "shared"] * 4))
-    # every field byte once; only tiny metadata reads made before any claim may race:
-    # the time-axis check and the 4 KiB header probe that sizes the tiling
-    overhead = (stores[0] / "time" / "0").stat().st_size + 4096
-    assert reference <= sum(s["bytes"] for s in stats) <= reference + 4 * overhead
+    assert sum(s["bytes"] for s in stats) == reference  # every byte once, whoever reads it
 
 
 def test_groups_of_one_hour_sharing_blocks_are_downloaded_once(
@@ -137,5 +134,4 @@ def test_groups_of_one_hour_sharing_blocks_are_downloaded_once(
     assert alone["cubes"] == 2 * 3  # two groups per hour
     with ThreadPoolExecutor(4) as ex:
         stats = list(ex.map(run, [tmp_path / "shared"] * 4))
-    overhead = (stores[0] / "time" / "0").stat().st_size + 4096  # reads made before any claim
-    assert alone["bytes"] <= sum(s["bytes"] for s in stats) <= alone["bytes"] + 4 * overhead
+    assert sum(s["bytes"] for s in stats) == alone["bytes"]

@@ -69,17 +69,12 @@ def test_lookup_and_put_serve_page_level_callers(tmp_path: Path) -> None:
     assert (cache.object_dir("ns", "f.om") / "key.txt").read_text() == "f.om"
 
 
-def test_claims_serialise_the_same_token(tmp_path: Path) -> None:
-    cache = RangeCache(tmp_path)
-    inside: list[int] = []
-    overlaps: list[bool] = []
-
-    def work(i: int) -> None:
-        with cache.claim("hour-7"):
-            overlaps.append(bool(inside))
-            inside.append(i)
-            inside.pop()
-
+def test_concurrent_readers_of_one_range_download_it_once(tmp_path: Path) -> None:
+    store, inner = _store(tmp_path)
+    with ThreadPoolExecutor(8) as ex:
+        out = list(ex.map(lambda _: store.get("a/0.0", 100, 9000), range(16)))
+    assert all(o == BLOB[100:9000] for o in out)
+    assert inner.stats.bytes == 8900
     with ThreadPoolExecutor(4) as ex:
-        list(ex.map(work, range(20)))
-    assert overlaps == [False] * 20
+        full = list(ex.map(lambda _: store.get("a/0.0"), range(8)))
+    assert all(f == BLOB for f in full) and inner.stats.bytes == 8900 + len(BLOB)
