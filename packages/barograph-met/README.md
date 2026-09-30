@@ -23,7 +23,7 @@ aircraft positions (time, latitude, longitude, barometric altitude).
 ```python
 from baro.met import Enricher, arco_model_levels, track_components
 
-res = Enricher(arco_model_levels(), cache_dir="~/data/cubes").enrich(
+res = Enricher(arco_model_levels(), cache_dir="~/data/era5-cache").enrich(
     time_utc, lat, lon, altitude_ft=baro_alt_ft
 )
 res["u"], res["v"], res["t"], res.flags, res.stats
@@ -45,8 +45,10 @@ along, cross = track_components(res["u"], res["v"], track_deg)
   actual surface pressure, interpolation in ln p.
 - **Explicit**: no silent extrapolation — every missing value has a flag, and
   points outside a source's period are reported.
-- **Campaign-ready**: immutable cube cache shared by processes, per-host
-  concurrency caps, retry with backoff.
+- **Campaign-ready**: the cost depends on the area and hours covered, not on
+  the number of flights; an on-disk cache of the byte ranges read, shared by
+  calls and processes (a byte is downloaded once, whatever the call order);
+  per-host concurrency caps, retry with backoff.
 - **FastMeteo-compatible façade**: `baro.met.compat.ArcoEra5` and
   `Arpege`, same constructors and `interpolate(df)`.
 

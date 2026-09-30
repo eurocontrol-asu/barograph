@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 
 import numpy as np
 import pytest
 
-from baro.met import DataUnavailableError, Domain, Enricher, Flag
+from baro.met import DataUnavailableError, Domain, Enricher, Flag, Tiling
 from baro.met.domain import Cube
 from baro.met.enrich import UncoveredPointsWarning
 from synthetic import EPOCH, FakeSource
@@ -61,3 +62,35 @@ def test_configuration_errors(source: FakeSource) -> None:
         Enricher(source, on_uncovered="raise").enrich(
             _times([20.0]), [45.0], [0.0], pressure_pa=[3e4]
         )
+
+
+def test_distant_groups_of_one_hour_get_their_own_cubes(source: FakeSource) -> None:
+    source.tiles = Tiling(lat0=-90.0, lat_step=2.0)  # 2-degree latitude bands
+    t = _times([1.0, 1.0, 1.0, 1.0])
+    lat = [41.0, 41.3, 48.8, 49.0]  # two groups, several empty bands apart
+    res = Enricher(source).enrich(t, lat, [0.0] * 4, pressure_pa=[3e4] * 4)
+    assert np.all(res.flags == Flag.OK) and res.stats["cubes"] == 2
+    boxes = sorted((d.lat_min, d.lat_max) for d in source.domains)
+    assert boxes == [(40.5, 41.8), (48.3, 49.5)]  # never the empty bands in between
+
+
+def test_touching_groups_share_one_cube(source: FakeSource) -> None:
+    source.tiles = Tiling(lat0=-90.0, lat_step=2.0)
+    res = Enricher(source).enrich(
+        _times([1.0, 1.0]), [41.0, 43.0], [0.0, 0.0], pressure_pa=[3e4, 3e4]
+    )
+    assert res.stats["cubes"] == 1
+
+
+def test_a_fixed_domain_disables_the_split(source: FakeSource) -> None:
+    source.tiles = Tiling(lat0=-90.0, lat_step=2.0)
+    box = Domain(40.0, 50.0, -5.0, 10.0)
+    res = Enricher(source, domain=box).enrich(
+        _times([1.0, 1.0]), [41.0, 49.0], [0.0, 0.0], pressure_pa=[3e4, 3e4]
+    )
+    assert res.stats["cubes"] == 1 and source.domains == [box]
+
+
+def test_the_cache_is_handed_to_the_source(source: FakeSource, tmp_path: Path) -> None:
+    enricher = Enricher(source, cache_dir=tmp_path)
+    assert source.cache is enricher.cache and source.cache is not None

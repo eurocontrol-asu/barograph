@@ -61,7 +61,7 @@ def test_global_mode_cache_serves_any_later_flight(arco: Path, tmp_path: Path) -
     second = engine()
     out = second.interpolate(_frame(EPOCH, 10.0, 100.0))  # elsewhere on the globe
     assert second.last_result is not None
-    assert second.last_result.stats["bytes"] == 0 and second.last_result.stats["cache_hits"] > 0
+    assert second.last_result.stats["bytes"] == 0 and second.last_result.stats["cache_bytes"] > 0
     assert out.temperature.notna().all()
 
 

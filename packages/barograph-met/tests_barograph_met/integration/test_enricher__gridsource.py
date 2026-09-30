@@ -61,9 +61,24 @@ def test_second_run_is_served_by_the_cache_without_transfer(
     second = Enricher(_source(stores), cache_dir=tmp_path).enrich(
         time, lat, lon, pressure_pa=pressure
     )
-    assert first.stats["fetched"] == 3 and first.stats["bytes"] > 0
-    assert second.stats["cache_hits"] == 3 and second.stats["bytes"] == 0
+    assert first.stats["bytes"] > 0
+    assert second.stats["bytes"] == 0 and second.stats["cache_bytes"] > 0
     np.testing.assert_array_equal(first["u"], second["u"])
+
+
+def test_flights_already_covered_by_an_earlier_call_are_free(
+    stores: tuple[Path, Path], tmp_path: Path
+) -> None:
+    time, lat, lon, pressure, _ = _flights()
+    whole = Enricher(_source(stores), cache_dir=tmp_path).enrich(
+        time, lat, lon, pressure_pa=pressure
+    )
+    for part in (slice(200, None), slice(0, 200)):  # each flight on its own, any order
+        alone = Enricher(_source(stores), cache_dir=tmp_path).enrich(
+            time[part], lat[part], lon[part], pressure_pa=pressure[part]
+        )
+        assert alone.stats["bytes"] == 0
+        np.testing.assert_allclose(alone["t"], whole["t"][part], rtol=1e-12)
 
 
 def test_unavailable_hour_is_flagged_not_extrapolated(stores: tuple[Path, Path]) -> None:
@@ -75,20 +90,23 @@ def test_unavailable_hour_is_flagged_not_extrapolated(stores: tuple[Path, Path])
     assert np.isnan(result["t"][0]) and np.isfinite(result["t"][1])
 
 
-def test_concurrent_enrichers_download_each_cube_once(
+def test_concurrent_enrichers_download_each_byte_once(
     stores: tuple[Path, Path], tmp_path: Path
 ) -> None:
     from concurrent.futures import ThreadPoolExecutor
 
     time, lat, lon, pressure, _ = _flights()
 
-    def run(_: int) -> dict[str, int]:
-        res = Enricher(_source(stores), cache_dir=tmp_path).enrich(
+    def run(cache: Path) -> dict[str, int]:
+        res = Enricher(_source(stores), cache_dir=cache).enrich(
             time, lat, lon, pressure_pa=pressure
         )
         return res.stats
 
+    reference = run(tmp_path / "alone")["bytes"]
     with ThreadPoolExecutor(4) as ex:
-        stats = list(ex.map(run, range(4)))
-    assert sum(s["fetched"] for s in stats) == 3  # one download per cube, whoever wins the claim
-    assert sum(s["cache_hits"] for s in stats) == 3 * 3
+        stats = list(ex.map(run, [tmp_path / "shared"] * 4))
+    # every field byte once; only tiny metadata reads made before any claim may race:
+    # the time-axis check and the 4 KiB header probe that sizes the tiling
+    overhead = (stores[0] / "time" / "0").stat().st_size + 4096
+    assert reference <= sum(s["bytes"] for s in stats) <= reference + 4 * overhead

@@ -5,9 +5,12 @@ message per variable/level/step for ARPEGE GRIB2), so the cost of a time slice
 is paid once for every flight that crosses it. Points of *all* flights are
 grouped by the interval ``[t0, t0 + step)`` of the source's native time step;
 the source says which two cubes bracket each interval (and, for forecasts, from
-which run). Each cube is fetched once (or read from the cache) over the domain
-and pressure range of all the points that use it, with bounded look-ahead, and
-released as soon as the last interval using it is done.
+which run). The points using one time slice are split along the source's own
+tiling (:mod:`baro.met.tiling`): each group of touching occupied tiles becomes
+one cube, fetched once over the region and pressure range of its points, with
+bounded look-ahead, and released as soon as the last interval using it is
+done. With a ``cache_dir``, every byte read is kept (:mod:`baro.met.rangecache`),
+so the cost of a campaign does not depend on how its flights are split into calls.
 """
 
 from __future__ import annotations
@@ -26,7 +29,6 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 from baro.met.base import CubeKey, DataUnavailableError, Source
-from baro.met.cache import CubeCache, CubeQuery
 from baro.met.domain import Cube, Domain
 from baro.met.isa import pressure_from_altitude_ft
 from baro.met.kernel import (
@@ -36,6 +38,8 @@ from baro.met.kernel import (
     VerticalMethod,
     sample,
 )
+from baro.met.rangecache import RangeCache
+from baro.met.tiling import Tiling, partition
 
 __all__ = ["EnrichResult", "Enricher", "UncoveredPointsWarning"]
 
@@ -71,6 +75,7 @@ class _CubeRequest:
     key: CubeKey
     domain: Domain
     p_range: tuple[float, float]
+    token: str  # claim token: identical requests of other processes share it
 
 
 @dataclass(frozen=True)
@@ -91,7 +96,13 @@ class _Points:
 class _Interval:
     t0: np.datetime64
     points: NDArray[np.int64]  # indices into the valid points
-    keys: tuple[CubeKey, CubeKey | None]  # second key only if some point needs it
+    req0: NDArray[np.int64]  # per point: request of the cube at t0
+    req1: NDArray[np.int64]  # per point: request of the cube at t0 + step (-1: not needed)
+
+    @property
+    def requests(self) -> list[int]:
+        """Requests this interval uses."""
+        return sorted({*self.req0.tolist(), *self.req1[self.req1 >= 0].tolist()})
 
 
 class _Prefetcher:
@@ -100,37 +111,34 @@ class _Prefetcher:
     def __init__(
         self,
         intervals: list[_Interval],
-        fetch: Callable[[CubeKey], Future[Cube | None]],
+        fetch: Callable[[int], Future[Cube | None]],
         depth: int,
     ) -> None:
-        used = [key for iv in intervals for key in iv.keys if key is not None]
+        used = [r for iv in intervals for r in iv.requests]
         self._order = list(dict.fromkeys(used))
-        self._position = {key: i for i, key in enumerate(self._order)}
+        self._position = {r: i for i, r in enumerate(self._order)}
         self._remaining = Counter(used)
-        self._futures: dict[CubeKey, Future[Cube | None]] = {}
+        self._futures: dict[int, Future[Cube | None]] = {}
         self._submitted = 0
         self._fetch = fetch
         self._depth = depth
 
-    def cubes(self, iv: _Interval) -> tuple[Cube | None, Cube | None]:
-        """The two cubes of an interval (waiting for them), after scheduling the next ones."""
-        needed = [k for k in iv.keys if k is not None]
-        target = min(max(self._position[k] for k in needed) + self._depth, len(self._order))
+    def cubes(self, iv: _Interval) -> dict[int, Cube | None]:
+        """The cubes of an interval (waiting for them), after scheduling the next ones."""
+        needed = iv.requests
+        target = min(max(self._position[r] for r in needed) + self._depth, len(self._order))
         while self._submitted < target:
-            key = self._order[self._submitted]
-            self._futures[key] = self._fetch(key)
+            req = self._order[self._submitted]
+            self._futures[req] = self._fetch(req)
             self._submitted += 1
-        k0, k1 = iv.keys
-        return self._futures[k0].result(), None if k1 is None else self._futures[k1].result()
+        return {r: self._futures[r].result() for r in needed}
 
     def release(self, iv: _Interval) -> None:
         """Forget the cubes this interval was the last user of."""
-        for key in iv.keys:
-            if key is None:
-                continue
-            self._remaining[key] -= 1
-            if self._remaining[key] == 0:
-                self._futures.pop(key)
+        for r in iv.requests:
+            self._remaining[r] -= 1
+            if self._remaining[r] == 0:
+                self._futures.pop(r)
 
 
 class Enricher:
@@ -142,14 +150,17 @@ class Enricher:
         Gridded source, e.g. :func:`baro.met.arco_model_levels` or
         :class:`baro.met.arpege.ArpegeSource`.
     cache_dir:
-        Optional immutable cube cache shared between runs and processes.
+        Optional on-disk cache of every byte read (immutable data only), shared
+        between runs, calls and processes: a later call downloads only what no
+        earlier call has read.
     mode:
         ``"flight"`` (default) reads only the region and levels the points
         need. ``"global"`` reads whole fields on every level (FastMeteo-like),
         so that one cache serves any later flight.
     domain:
-        Fixed domain for every cube (recommended for campaigns: maximises
-        cache reuse). By default each cube uses the box of its own points.
+        Fixed domain for every cube. By default the points of each time slice
+        are split along the source's tiling, and each group gets the box of
+        its own points.
     margin_deg:
         Margin around the points when the domain is derived from them.
     level_margin:
@@ -187,7 +198,9 @@ class Enricher:
         if mode not in ("flight", "global"):
             raise ValueError(f"unknown mode {mode!r}")
         self.source = source
-        self.cache = CubeCache(cache_dir) if cache_dir is not None else None
+        self.cache = RangeCache(cache_dir) if cache_dir is not None else None
+        if self.cache is not None:
+            source.use_cache(self.cache)
         self.mode = mode
         self.domain = domain if domain is not None or mode == "flight" else Domain.whole_globe()
         self.margin_deg = margin_deg
@@ -235,11 +248,7 @@ class Enricher:
         n = t.size
         values = {name: np.full(n, np.nan) for name in self.source.fields}
         flags = np.full(n, Flag.INVALID_INPUT, dtype=np.uint8)
-        ok = ~np.isnat(t) & np.isfinite(lat) & np.isfinite(lon) & np.isfinite(p) & (p > 0)
-        uncovered = self._check_coverage(t, ok)
-        flags[uncovered] = Flag.OUT_OF_COVERAGE
-        ok &= ~uncovered
-        idx = np.flatnonzero(ok)
+        idx = self._usable(t, lat, lon, p, flags)
         step = self.source.time_step
         t_ok = t[idx]
         t0 = t_ok - (t_ok - _EPOCH) % step
@@ -249,26 +258,46 @@ class Enricher:
         intervals, requests = self._plan(t0, w, la, lo, pp)
         counters: dict[str, Any] = {
             "cubes": len(requests),
-            "cache_hits": 0,
             "fetched": 0,
             "unavailable": 0,
             "cube_bytes": 0,
         }
+        cached_before = self._cache_hits()
         with (
             ThreadPoolExecutor(self.io_workers, thread_name_prefix="traj-io") as io,
             ThreadPoolExecutor(self.prefetch, thread_name_prefix="traj-cube") as cubes,
         ):
-            for iv, cube0, cube1 in self._stream(intervals, requests, io, cubes, counters):
-                sel = iv.points
-                v, f = self._interpolate(cube0, cube1, points.take(sel))
-                for name in values:
-                    values[name][idx[sel]] = v[name]
-                flags[idx[sel]] = f
+            for iv, got in self._stream(intervals, requests, io, cubes, counters):
+                for sel, r0, r1 in _pairs(iv):
+                    cube1 = None if r1 < 0 else got[r1]
+                    v, f = self._interpolate(got[r0], cube1, points.take(sel))
+                    for name in values:
+                        values[name][idx[sel]] = v[name]
+                    flags[idx[sel]] = f
         after = [s.snapshot() for s in self.source.stats]
         for name in ("bytes", "requests", "throttled"):
             counters[name] = int(sum(a[name] - b[name] for a, b in zip(after, before, strict=True)))
+        counters["cache_bytes"] = self._cache_hits() - cached_before
         counters["seconds"] = time.perf_counter() - started
         return EnrichResult(values, flags, counters)
+
+    def _usable(
+        self,
+        t: NDArray[np.datetime64],
+        lat: NDArray[np.float64],
+        lon: NDArray[np.float64],
+        p: NDArray[np.float64],
+        flags: NDArray[np.uint8],
+    ) -> NDArray[np.int64]:
+        """Indices of the valid, covered points; flags the uncovered ones."""
+        ok = ~np.isnat(t) & np.isfinite(lat) & np.isfinite(lon) & np.isfinite(p) & (p > 0)
+        uncovered = self._check_coverage(t, ok)
+        flags[uncovered] = Flag.OUT_OF_COVERAGE
+        return np.flatnonzero(ok & ~uncovered)
+
+    def _cache_hits(self) -> int:
+        """Bytes served by the cache so far."""
+        return 0 if self.cache is None else self.cache.stats.snapshot()["hit_bytes"]
 
     def _check_coverage(
         self, t: NDArray[np.datetime64], ok: NDArray[np.bool_]
@@ -304,68 +333,83 @@ class Enricher:
         lat: NDArray[np.float64],
         lon: NDArray[np.float64],
         p: NDArray[np.float64],
-    ) -> tuple[list[_Interval], dict[CubeKey, _CubeRequest]]:
-        """Intervals in time order, and one request per cube (union of its users)."""
-        intervals = []
+    ) -> tuple[list[_Interval], list[_CubeRequest]]:
+        """Intervals in time order, and the cube requests (one per occupied-tile group)."""
+        groups = _group(t0)
+        keys = {start: self.source.cube_keys(start) for start in groups}
         uses: dict[CubeKey, list[NDArray[np.int64]]] = {}
-        for start, members in _group(t0).items():
-            k0, k1 = self.source.cube_keys(start)
-            later = members[w[members] > 0]
+        for start, members in groups.items():
+            k0, k1 = keys[start]
             uses.setdefault(k0, []).append(members)
+            later = members[w[members] > 0]
             if later.size:
                 uses.setdefault(k1, []).append(later)
-            intervals.append(_Interval(start, members, (k0, k1 if later.size else None)))
-        requests = {}
+        requests: list[_CubeRequest] = []
+        lookup: dict[CubeKey, tuple[NDArray[np.int64], NDArray[np.int64]]] = {}
         for key, parts in uses.items():
-            sel = np.concatenate(parts)
-            domain = self.domain or Domain.from_points(lat[sel], lon[sel], self.margin_deg)
-            requests[key] = _CubeRequest(key, domain, (float(p[sel].min()), float(p[sel].max())))
+            sel = np.sort(np.concatenate(parts))
+            tiling = None if self.domain is not None else self.source.tiling(key)
+            labels = partition(lat[sel], lon[sel], self.margin_deg, tiling)
+            ids = np.empty(sel.size, dtype=np.int64)
+            for label in range(int(labels.max()) + 1 if sel.size else 0):
+                part = sel[labels == label]
+                ids[labels == label] = len(requests)
+                requests.append(self._request(key, tiling, lat[part], lon[part], p[part]))
+            lookup[key] = (sel, ids)
+        intervals = []
+        for start, members in groups.items():
+            k0, k1 = keys[start]
+            req1 = np.full(members.size, -1, dtype=np.int64)
+            needs_next = w[members] > 0
+            if needs_next.any():
+                req1[needs_next] = _request_ids(lookup[k1], members[needs_next])
+            intervals.append(_Interval(start, members, _request_ids(lookup[k0], members), req1))
         return intervals, requests
+
+    def _request(
+        self,
+        key: CubeKey,
+        tiling: Tiling | None,
+        lat: NDArray[np.float64],
+        lon: NDArray[np.float64],
+        p: NDArray[np.float64],
+    ) -> _CubeRequest:
+        """Request for the cube ``key`` over the region and pressures of some points."""
+        domain = self.domain or Domain.from_points(lat, lon, self.margin_deg)
+        src = key.source or self.source.source_id
+        return _CubeRequest(
+            key,
+            domain,
+            (float(p.min()), float(p.max())),
+            f"{src}|{key.valid}|{key.run}|{_tile_signature(domain, tiling)}",
+        )
 
     def _stream(
         self,
         intervals: list[_Interval],
-        requests: dict[CubeKey, _CubeRequest],
+        requests: list[_CubeRequest],
         io: ThreadPoolExecutor,
         pool: ThreadPoolExecutor,
         counters: dict[str, Any],
-    ) -> Iterator[tuple[_Interval, Cube | None, Cube | None]]:
+    ) -> Iterator[tuple[_Interval, dict[int, Cube | None]]]:
         """Intervals with their cubes; cubes are fetched ahead and freed after last use."""
 
-        def fetch(key: CubeKey) -> Future[Cube | None]:
+        def fetch(req: int) -> Future[Cube | None]:
             """Submit the download of one cube."""
-            return pool.submit(self._get_cube, requests[key], io, counters)
+            return pool.submit(self._get_cube, requests[req], io, counters)
 
         ahead = _Prefetcher(intervals, fetch, self.prefetch)
         for iv in intervals:
-            cube0, cube1 = ahead.cubes(iv)
-            yield iv, cube0, cube1
+            yield iv, ahead.cubes(iv)
             ahead.release(iv)
 
     def _get_cube(
         self, req: _CubeRequest, io: ThreadPoolExecutor, counters: dict[str, Any]
     ) -> Cube | None:
-        src = req.key.source or self.source.source_id
         if self.cache is None:
             return self._download(req, io, counters)
-        hit = self._cached(src, req)
-        if hit is not None:
-            self._count(counters, "cache_hits")
-            return hit
-        with self.cache.claim(src, req.key):
-            hit = self._cached(src, req)  # another process may have fetched it meanwhile
-            if hit is not None:
-                self._count(counters, "cache_hits")
-                return hit
-            cube = self._download(req, io, counters)
-            if cube is not None:
-                self.cache.put(cube)
-            return cube
-
-    def _cached(self, src: str, req: _CubeRequest) -> Cube | None:
-        assert self.cache is not None
-        query = CubeQuery(req.key, req.domain, req.p_range, self.level_margin)
-        return self.cache.find(src, query, list(self.source.fields))
+        with self.cache.claim(req.token):  # others wait, then read the bytes from disk
+            return self._download(req, io, counters)
 
     def _download(
         self, req: _CubeRequest, io: ThreadPoolExecutor, counters: dict[str, Any]
@@ -428,3 +472,36 @@ def _group(t0: NDArray[np.datetime64]) -> dict[np.datetime64, NDArray[np.int64]]
     return {
         np.datetime64(s, "s"): order[a:b] for s, a, b in zip(starts_t, starts, bounds, strict=True)
     }
+
+
+def _request_ids(
+    table: tuple[NDArray[np.int64], NDArray[np.int64]], points: NDArray[np.int64]
+) -> NDArray[np.int64]:
+    """Request of each of ``points`` in a cube's (sorted users, request ids) table."""
+    users, ids = table
+    return ids[np.searchsorted(users, points)]
+
+
+def _pairs(iv: _Interval) -> Iterator[tuple[NDArray[np.int64], int, int]]:
+    """Points (indices into the valid points) grouped by their two cube requests."""
+    pairs = np.stack([iv.req0, iv.req1], axis=1)
+    unique, inverse = np.unique(pairs, axis=0, return_inverse=True)
+    for i, (r0, r1) in enumerate(unique.tolist()):
+        yield iv.points[inverse.reshape(-1) == i], int(r0), int(r1)
+
+
+def _tile_signature(domain: Domain, tiling: Tiling | None) -> str:
+    """The tiles a request covers, identical for identical requests of other processes."""
+    if tiling is None:
+        return "all"
+    rows = (
+        int(np.floor((domain.lat_min - tiling.lat0) / tiling.lat_step)),
+        int(np.floor((domain.lat_max - tiling.lat0) / tiling.lat_step)),
+    )
+    if tiling.lon_step is None:
+        return f"rows{rows}"
+    cols = (
+        int(np.floor((domain.lon_min - tiling.lon0) / tiling.lon_step)),
+        int(np.floor((domain.lon_max - tiling.lon0) / tiling.lon_step)),
+    )
+    return f"rows{rows}cols{cols}"

@@ -88,3 +88,15 @@ def test_cached_index_avoids_rewalking_the_file(mirror: Path, tmp_path: Path) ->
     assert r1.stats["requests"] - r2.stats["requests"] >= messages_in_file  # no header walk
     assert r2.stats["requests"] <= r2.stats["cubes"] * 3 * 5 + 2  # only data messages (+ HEADs)
     np.testing.assert_array_equal(r1["u"], r2["u"])
+
+
+def test_cached_messages_are_never_downloaded_again(mirror: Path, tmp_path: Path) -> None:
+    time, lat, lon, p, _ = _flight()
+    first = Enricher(ArpegeSource(resolution="01", base_url=str(mirror)), cache_dir=tmp_path)
+    r1 = first.enrich(time, lat, lon, pressure_pa=p)
+    source = ArpegeSource(resolution="01", base_url=str(mirror))
+    r2 = Enricher(source, cache_dir=tmp_path).enrich(time, lat, lon, pressure_pa=p)
+    assert source.index_dir == tmp_path / "grib-index"  # indexes live with the cache
+    assert source.tiling(r2_key := source.cube_keys(time[0])[0]) is None and r2_key.run
+    assert r1.stats["bytes"] > 0 and r2.stats["bytes"] == 0 and r2.stats["cache_bytes"] > 0
+    np.testing.assert_array_equal(r1["u"], r2["u"])

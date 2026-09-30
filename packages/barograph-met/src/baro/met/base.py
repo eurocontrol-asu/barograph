@@ -17,7 +17,9 @@ import numpy as np
 
 if TYPE_CHECKING:
     from baro.met.domain import Cube, Domain
+    from baro.met.rangecache import RangeCache
     from baro.met.store import TransferStats
+    from baro.met.tiling import Tiling
 
 __all__ = ["CubeKey", "DataUnavailableError", "Source"]
 
@@ -61,6 +63,14 @@ class Source(Protocol):
 
     def coverage(self) -> tuple[np.datetime64, np.datetime64] | None:
         """First and last valid times the source can serve (``None``: unknown)."""
+        ...
+
+    def tiling(self, key: CubeKey) -> Tiling | None:
+        """Horizontal tiling of the cube ``key`` in storage (``None``: read as one piece)."""
+        ...
+
+    def use_cache(self, cache: RangeCache) -> None:
+        """Serve the immutable bytes this source reads through ``cache`` from now on."""
         ...
 
     def fetch(

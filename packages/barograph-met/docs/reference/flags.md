@@ -23,9 +23,10 @@ covered period, `"raise"` raises `DataUnavailableError`, `"flag"` only flags.
 
 | Key | Meaning |
 |---|---|
-| `cubes` | time slices needed |
-| `fetched`, `cache_hits`, `unavailable` | how they were obtained |
-| `cube_bytes` | memory of the downloaded cubes |
+| `cubes` | cubes needed (time slices × groups of occupied tiles) |
+| `fetched`, `unavailable` | how many were read, how many do not exist |
+| `cube_bytes` | memory of the cubes read |
 | `bytes`, `requests` | network transfer of this call |
+| `cache_bytes` | bytes served from the on-disk cache instead |
 | `throttled` | 429/5xx answers retried |
 | `seconds` | wall time |

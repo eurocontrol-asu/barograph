@@ -92,6 +92,7 @@ class ByteStore(Protocol):
     """Key/value byte access with optional ``[start, stop)`` ranges."""
 
     stats: TransferStats
+    location: str  # where the objects live (URL or directory), identifies the store
 
     def get(self, key: str, start: int | None = None, stop: int | None = None) -> bytes:
         """Object bytes, or the ``[start, stop)`` range of them."""
@@ -116,6 +117,7 @@ class HttpStore:
         max_connections: int = 64,
     ) -> None:
         self.base_url = base_url.rstrip("/")
+        self.location = self.base_url
         limits = httpx.Limits(
             max_connections=max_connections, max_keepalive_connections=max_connections
         )
@@ -192,6 +194,7 @@ class FileStore:
 
     def __init__(self, root: str | Path) -> None:
         self.root = Path(root)
+        self.location = str(self.root.resolve())
         self.stats = TransferStats()
 
     def get(self, key: str, start: int | None = None, stop: int | None = None) -> bytes:
@@ -318,6 +321,25 @@ class ZarrStore:
                 "(zarr v2 edge chunks must be padded to the full chunk shape)"
             )
         return np.frombuffer(raw, dtype=meta.dtype).reshape(meta.chunks)
+
+    def block_rows(self, name: str, lead: Sequence[int]) -> int | None:
+        """Latitude rows per Blosc block of ``name``, read from the chunk holding ``lead``.
+
+        ``lead`` gives the leading (time, [level]) indices of an existing slab.
+        Blocks do not align with level slabs, so this is the typical height of
+        the latitude band one block holds, not an exact partition.
+        """
+        meta = self.array(name)
+        nlead = len(meta.shape) - 2
+        index = [int(i) // c for i, c in zip(lead, meta.chunks[:nlead], strict=True)]
+        try:
+            header = self._header(meta, meta.chunk_key([*index, 0, 0]))
+        except MissingChunkError:
+            return None
+        if header is None:
+            return None
+        row = meta.shape[-1] * meta.dtype.itemsize
+        return max(header.blocksize // row, 1)
 
     # -- regional reads -------------------------------------------------------------------
     def read_rows(

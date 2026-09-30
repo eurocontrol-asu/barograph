@@ -32,7 +32,9 @@ import numpy as np
 from baro.met.base import CubeKey, DataUnavailableError
 from baro.met.domain import Cube, Domain, GridIndex
 from baro.met.grib import GribIndex, decode_message, fetch_messages
+from baro.met.rangecache import CachedStore, RangeCache, namespace_for
 from baro.met.store import ByteStore, FileStore, HttpStore, MissingChunkError, TransferStats
+from baro.met.tiling import Tiling
 from baro.met.vertical import (
     MIN_LEVELS,
     STANDARD_SURFACE_PRESSURE,
@@ -100,7 +102,11 @@ class ArpegeSource:
     base_url / store:
         Where files live (HTTP base URL, local mirror directory, or a store).
     index_dir:
-        Directory caching the per-file message indexes (strongly recommended).
+        Directory caching the per-file message indexes (strongly recommended;
+        defaults to the enricher's cache when it has one).
+
+    The files of a published run never change: with a cache (:meth:`use_cache`)
+    every GRIB message read is kept on disk and never downloaded again.
     """
 
     def __init__(  # noqa: PLR0913 - keyword-only configuration of a public source
@@ -130,6 +136,7 @@ class ArpegeSource:
         self.time_step = _HOUR  # hourly for isobaric levels >= 100 hPa on both grids
         is_local = "://" not in base_url
         self.store = store or (FileStore(base_url) if is_local else HttpStore(base_url))
+        self._messages: ByteStore = self.store  # message reads (through the cache, if any)
         self.index_dir = None if index_dir is None else Path(index_dir).expanduser()
         self.source_id = f"arpege-{resolution}-{package}"
         self.listing_url = listing_url
@@ -143,6 +150,18 @@ class ArpegeSource:
     def stats(self) -> list[TransferStats]:
         """Transfer counters of the underlying store."""
         return [self.store.stats]
+
+    def tiling(self, key: CubeKey) -> Tiling | None:
+        """``None``: a GRIB message holds a whole field, read in one piece."""
+        return None
+
+    def use_cache(self, cache: RangeCache) -> None:
+        """Keep every message read in ``cache``; message indexes go there too by default."""
+        self._messages = CachedStore(
+            self.store, cache, namespace_for(self.store.location), lambda _key: True
+        )
+        if self.index_dir is None:
+            self.index_dir = cache.root / "grib-index"
 
     # -- coverage ------------------------------------------------------------------------------
     def published_runs(self) -> list[np.datetime64]:
@@ -301,7 +320,7 @@ class ArpegeSource:
                 if msg is None:
                     raise DataUnavailableError(f"{file}: no {name} at {hpa} hPa, step {lead_h} h")
                 wanted.append(msg)
-        buffers = fetch_messages(self.store, file, wanted, executor)
+        buffers = fetch_messages(self._messages, file, wanted, executor)
         decoded = [decode_message(b) for b in buffers]
         _, lat, lon = decoded[0]
         grid = GridIndex.locate(domain, lat, lon)

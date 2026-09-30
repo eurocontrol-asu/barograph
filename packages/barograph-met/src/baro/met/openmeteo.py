@@ -24,25 +24,28 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import re
 import threading
 import time
 from collections import OrderedDict
 from collections.abc import Sequence
 from concurrent.futures import Executor
-from http import HTTPStatus
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import numpy as np
 from numpy.typing import NDArray
 
+from baro.met.asyncfs import DiskPages, LocalAsyncFS, PagedAsyncFS
 from baro.met.base import CubeKey, DataUnavailableError
 from baro.met.domain import Cube, Domain, GridIndex
-from baro.met.limits import async_slot, run_async
+from baro.met.limits import run_async
 from baro.met.store import TransferStats
+from baro.met.tiling import Tiling
+
+if TYPE_CHECKING:
+    from baro.met.rangecache import RangeCache
 from baro.met.vertical import (
     MIN_LEVELS,
     STANDARD_SURFACE_PRESSURE,
@@ -52,13 +55,17 @@ from baro.met.vertical import (
 __all__ = [
     "OPENMETEO_BASE_URL",
     "OPENMETEO_VARIABLES",
+    "STITCH_WINDOW",
     "ArchiveCatalog",
-    "LocalAsyncFS",
     "OpenMeteoSource",
-    "PagedAsyncFS",
     "TileReader",
     "gather_tiles",
 ]
+
+# Open-Meteo keeps rewriting the recent hours of its archive with newer runs: only
+# chunks that ended longer ago than this are treated as immutable and cached.
+STITCH_WINDOW = np.timedelta64(7, "D")
+_CHUNK_FILE = re.compile(r"chunk_(\d+)\.om$")
 
 OPENMETEO_BASE_URL = "https://openmeteo.s3.amazonaws.com"
 
@@ -74,11 +81,8 @@ _LEVEL = re.compile(r"^(?P<var>[a-z_]+)_(?P<hpa>\d+)hPa$")
 _CHUNK = re.compile(r"^chunk_(\d+)\.om$")
 _BBOX = re.compile(r"BBOX\[([-\d.]+),([-\d.]+),([-\d.]+),([-\d.]+)\]")
 _HOUR_S = 3600
-_ATTEMPTS = 5
-_RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
 # archive files are (lat, lon, time) since early 2025, (lat * lon, time) before
 _GRID_LAYOUT_NDIM = 3
-_log = logging.getLogger("baro.met.http")
 
 type TileKey = tuple[str, int, int, tuple[int, int]]  # variable, hPa, chunk, tile
 
@@ -88,145 +92,6 @@ def _is_local(base: str) -> bool:
 
 
 # -- byte access for omfiles -----------------------------------------------------------------
-class PagedAsyncFS:
-    """Async fsspec-like object for ``omfiles`` (``_cat_file``/``_size``), with a page cache.
-
-    ``omfiles`` issues one range request per internal data chunk, and archive
-    chunks are tiny (1 latitude row x 14 longitudes, a few hundred bytes).
-    Requests are therefore served from aligned pages of ``page_size`` bytes
-    (a page holds several whole latitude rows); concurrent requests for the
-    same page share one download. This trades a few extra bytes for ~50x fewer
-    round trips, which dominate the cost.
-    """
-
-    def __init__(
-        self,
-        base_url: str,
-        stats: TransferStats,
-        max_connections: int,
-        page_size: int = 512 << 10,
-        cache_mb: float = 256.0,
-    ) -> None:
-        self.base_url = base_url.rstrip("/")
-        self.stats = stats
-        self.page_size = page_size
-        self.client = httpx.AsyncClient(
-            timeout=120.0,
-            follow_redirects=True,
-            limits=httpx.Limits(max_connections=max_connections),
-        )
-        self._pages: OrderedDict[tuple[str, int], bytes] = OrderedDict()
-        self._inflight: dict[tuple[str, int], asyncio.Future[bytes]] = {}
-        self._sizes: dict[str, int] = {}
-        self._bytes = 0
-        self._limit = int(cache_mb * 1e6)
-
-    async def _request(self, method: str, path: str, headers: dict[str, str]) -> httpx.Response:
-        url = f"{self.base_url}/{path}"
-        for attempt in range(_ATTEMPTS):
-            try:
-                t0 = time.perf_counter()
-                async with async_slot(url):
-                    resp = await self.client.request(method, url, headers=headers)
-            except httpx.TransportError:
-                if attempt == _ATTEMPTS - 1:
-                    raise
-                await asyncio.sleep(0.5 * 2**attempt)
-                continue
-            if resp.status_code in _RETRY_STATUS and attempt < _ATTEMPTS - 1:
-                self.stats.throttle()
-                _log.warning(
-                    "HTTP %s from %s (attempt %d), backing off", resp.status_code, url, attempt + 1
-                )
-                await asyncio.sleep(0.5 * 2**attempt)
-                continue
-            if resp.status_code == HTTPStatus.NOT_FOUND:
-                raise FileNotFoundError(path)
-            resp.raise_for_status()
-            self.stats.add(len(resp.content), time.perf_counter() - t0)
-            return resp
-        raise RuntimeError("unreachable")  # pragma: no cover
-
-    async def _page(self, path: str, index: int) -> bytes:
-        key = (path, index)
-        if key in self._pages:
-            self._pages.move_to_end(key)
-            return self._pages[key]
-        if key in self._inflight:
-            return await self._inflight[key]
-        future: asyncio.Future[bytes] = asyncio.get_running_loop().create_future()
-        self._inflight[key] = future
-        try:
-            size = await self._size(path)
-            start = index * self.page_size
-            stop = min(start + self.page_size, size)
-            resp = await self._request("GET", path, {"Range": f"bytes={start}-{stop - 1}"})
-            data = resp.content
-            self._pages[key] = data
-            self._bytes += len(data)
-            while self._bytes > self._limit and len(self._pages) > 1:
-                _, old = self._pages.popitem(last=False)
-                self._bytes -= len(old)
-            future.set_result(data)
-            return data
-        except BaseException as exc:
-            future.set_exception(exc)
-            raise
-        finally:
-            del self._inflight[key]
-
-    async def _cat_file(
-        self, path: str, start: int | None = None, end: int | None = None, **_: Any
-    ) -> bytes:
-        size = await self._size(path)
-        start = 0 if start is None else start
-        end = size if end is None else min(end, size)
-        first, last = start // self.page_size, max(end - 1, start) // self.page_size
-        pages = await asyncio.gather(*(self._page(path, i) for i in range(first, last + 1)))
-        blob = b"".join(pages)
-        offset = first * self.page_size
-        return blob[start - offset : end - offset]
-
-    async def _size(self, path: str, **_: Any) -> int:
-        if path not in self._sizes:
-            resp = await self._request("HEAD", path, {})
-            self._sizes[path] = int(resp.headers["content-length"])
-        return self._sizes[path]
-
-    async def aclose(self) -> None:
-        """Close the HTTP connection pool."""
-        await self.client.aclose()
-
-
-class LocalAsyncFS:
-    """The same interface over a local mirror directory."""
-
-    def __init__(self, root: str | Path, stats: TransferStats) -> None:
-        self.root = Path(root)
-        self.stats = stats
-
-    async def _cat_file(
-        self, path: str, start: int | None = None, end: int | None = None, **_: Any
-    ) -> bytes:
-        file = self.root / path
-        if not file.is_file():
-            raise FileNotFoundError(path)
-        with file.open("rb") as fh:
-            fh.seek(start or 0)
-            data = fh.read(None if end is None else end - (start or 0))
-        self.stats.add(len(data), 0.0)
-        return data
-
-    async def _size(self, path: str, **_: Any) -> int:
-        file = self.root / path
-        if not file.is_file():
-            raise FileNotFoundError(path)
-        return file.stat().st_size
-
-    async def aclose(self) -> None:
-        """Nothing to release."""
-
-
 # -- what is archived ------------------------------------------------------------------------
 class ArchiveCatalog:
     """Time chunking, grid box, levels and first chunk of one archived model."""
@@ -327,6 +192,7 @@ class TileReader:
         self._cache_limit = int(cache_mb * 1e6)
         self._lock = threading.Lock()
         self._fs: PagedAsyncFS | LocalAsyncFS | None = None
+        self.disk: DiskPages | None = None
 
     def _filesystem(self) -> PagedAsyncFS | LocalAsyncFS:
         if self._fs is None:  # only touched from the shared I/O loop thread
@@ -336,6 +202,8 @@ class TileReader:
                 if _is_local(base)
                 else PagedAsyncFS(base, self.stats, self.max_connections)
             )
+        if isinstance(self._fs, PagedAsyncFS):
+            self._fs.disk = self.disk
         return self._fs
 
     def close(self) -> None:
@@ -547,6 +415,31 @@ class OpenMeteoSource:
     def chunk_hours(self) -> int:
         """Hours per archive file."""
         return self.catalog.chunk_hours
+
+    def tiling(self, key: CubeKey) -> Tiling | None:
+        """The archive's square tiles of ``tile_deg`` degrees."""
+        self.reader.ensure_shape(*self._probe)
+        lat, lon = self.reader.grid()
+        tp = self.reader.tile_points()
+        dlat, dlon = abs(float(lat[0] - lat[1])), float(lon[1] - lon[0])
+        return Tiling(
+            lat0=float(lat[-1]) - dlat / 2,
+            lat_step=tp * dlat,
+            lon0=float(lon[0]) - dlon / 2,
+            lon_step=tp * dlon,
+        )
+
+    def use_cache(self, cache: RangeCache) -> None:
+        """Keep on disk the pages of archive chunks older than the stitching window."""
+        self.reader.disk = DiskPages.at(cache, self.catalog.base, self._final_path)
+
+    def _final_path(self, path: str) -> bool:
+        """True for a chunk file that no later run can rewrite any more."""
+        m = _CHUNK_FILE.search(path)
+        if m is None:
+            return False
+        end = np.datetime64((int(m.group(1)) + 1) * self.catalog.chunk_hours, "h")
+        return bool(end < np.datetime64("now", "h") - STITCH_WINDOW)
 
     def coverage(self) -> tuple[np.datetime64, np.datetime64]:
         """First and last archived hours (the first chunk may start partly empty)."""

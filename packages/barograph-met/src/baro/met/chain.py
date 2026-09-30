@@ -22,7 +22,9 @@ import numpy as np
 
 from baro.met.base import CubeKey, DataUnavailableError, Source
 from baro.met.domain import Cube, Domain
+from baro.met.rangecache import RangeCache
 from baro.met.store import TransferStats
+from baro.met.tiling import Tiling
 
 __all__ = ["SourceChain"]
 
@@ -74,6 +76,16 @@ class SourceChain:
         chosen = next((s for s in self.sources if self._serves(s, t0h)), self.sources[-1])
         k0, k1 = chosen.cube_keys(t0h)
         return replace(k0, source=chosen.source_id), replace(k1, source=chosen.source_id)
+
+    def tiling(self, key: CubeKey) -> Tiling | None:
+        """Tiling of the source the key was routed to."""
+        routed = self._by_id.get(key.source or "")
+        return None if routed is None else routed.tiling(key)
+
+    def use_cache(self, cache: RangeCache) -> None:
+        """Share ``cache`` with every chained source."""
+        for source in self.sources:
+            source.use_cache(cache)
 
     def fetch(
         self,

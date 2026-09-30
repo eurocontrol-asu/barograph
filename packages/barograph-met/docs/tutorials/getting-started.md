@@ -23,12 +23,12 @@ lon = np.linspace(2.4, 3.2, n)
 altitude_ft = np.full(n, 35_000.0)          # barometric (pressure) altitude
 track_deg = np.full(n, 150.0)
 
-enricher = Enricher(arco_model_levels(), cache_dir="~/data/cubes")
+enricher = Enricher(arco_model_levels(), cache_dir="~/data/era5-cache")
 res = enricher.enrich(time_utc, lat, lon, altitude_ft=altitude_ft)
 
 print(res["t"][:3], res.flags[:3])          # temperature (K) and flags (0 = OK)
 along, cross = track_components(res["u"], res["v"], track_deg)
-print(res.stats)                            # bytes, requests, cubes, cache hits, seconds
+print(res.stats)                            # bytes, cache_bytes, requests, cubes, seconds
 ```
 
 What happened:
@@ -39,8 +39,10 @@ What happened:
    were downloaded (a few MB instead of ~1.2 GB per hour).
 3. Each value was interpolated between model levels using the column's own
    surface pressure, then in latitude/longitude and in time.
-4. The cubes were written to `~/data/cubes`: running the script again
-   downloads nothing (`res.stats["bytes"] == 0`).
+4. The bytes read were kept in `~/data/era5-cache`: running the script again,
+   or any flight over the same area and hours, downloads nothing
+   (`res.stats["bytes"] == 0`) — up to the metadata of the store, and except
+   for the last ~3 months (preliminary ERA5T), which are never cached.
 
 ## Reading the flags
 

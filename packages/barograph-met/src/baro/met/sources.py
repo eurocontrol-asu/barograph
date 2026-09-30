@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 import threading
+from collections.abc import Callable
 from concurrent.futures import Executor
 from dataclasses import dataclass
 from datetime import datetime
@@ -14,7 +15,9 @@ from numpy.typing import ArrayLike, NDArray
 
 from baro.met.base import CubeKey, DataUnavailableError
 from baro.met.domain import Cube, Domain, GridIndex
+from baro.met.rangecache import CachedStore, RangeCache, namespace_for
 from baro.met.store import FileStore, HttpStore, TransferStats, ZarrStore
+from baro.met.tiling import Tiling
 from baro.met.vertical import (
     STANDARD_SURFACE_PRESSURE,
     VerticalCoordinate,
@@ -48,6 +51,10 @@ FASTMETEO_LEVELS_22 = (
     500, 550, 600, 650, 700, 750, 800, 850, 900, 950, 1000,
 )  # fmt: skip
 
+# ERA5T (the preliminary analyses of the last months) may still be replaced by the
+# final ERA5: only hours older than this are treated as immutable and cached.
+FINAL_AFTER = np.timedelta64(92, "D")
+
 _UNITS = re.compile(r"hours since (\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2}(?::\d{2})?))?")
 
 
@@ -64,7 +71,9 @@ class GridSource:
 
     ``vertical`` lists all levels of the store's level axis, in the store's
     order (top to bottom). Cubes carry only the levels needed to bracket the
-    requested pressures, read with block-level range requests.
+    requested pressures, read with block-level range requests. With a cache
+    (:meth:`use_cache`), the field chunks of hours older than ``final_after``
+    are kept on disk; metadata and recent (ERA5T) hours are always re-read.
     """
 
     def __init__(  # noqa: PLR0913 - keyword-only configuration of a public source
@@ -76,8 +85,10 @@ class GridSource:
         fields: dict[str, str] | None = None,
         level_array: str,
         surface_pressure: SurfacePressure | None = None,
+        final_after: np.timedelta64 = FINAL_AFTER,
     ) -> None:
         self.source_id = source_id
+        self.final_after = final_after
         self.store = store
         self.vertical = vertical
         self.fields = dict(fields or DEFAULT_FIELDS)
@@ -98,6 +109,8 @@ class GridSource:
         self._t0 = int(store.read_1d("time", 0, 1)[0])
         self._checked_time_chunks: set[int] = set()
         self._lock = threading.Lock()
+        self._tiling: Tiling | None = None
+        self._tiling_known = False
 
     @property
     def stats(self) -> list[TransferStats]:
@@ -149,6 +162,47 @@ class GridSource:
             else np.datetime64(stop, "h")
         )
         return begin, np.datetime64(end, "h")
+
+    def tiling(self, key: CubeKey) -> Tiling | None:
+        """Latitude bands of about one Blosc block (every longitude), the same for every hour.
+
+        Read once from the header of one fixed chunk (the first published hour),
+        so every call and process probes the same, cacheable, few KiB.
+        """
+        if self._tiling_known:
+            return self._tiling
+        coverage = self.coverage()
+        try:
+            t = 0 if coverage is None else self.time_index(coverage[0])
+        except KeyError:
+            t = 0
+        name = next(iter(self.fields.values()))
+        rows = self.store.block_rows(name, [t, 0][: self._lead_dims(name)])
+        if rows is not None and len(self.lat) > 1:
+            step = rows * abs(float(self.lat[0] - self.lat[1]))
+            bands = int(np.ceil(len(self.lat) / rows))
+            self._tiling = Tiling(lat0=float(self.lat[0]) - bands * step, lat_step=step)
+        self._tiling_known = True
+        return self._tiling
+
+    def _lead_dims(self, name: str) -> int:
+        """Number of leading (time, level) dimensions of array ``name``."""
+        return len(self.store.array(name).shape) - 2
+
+    def use_cache(self, cache: RangeCache) -> None:
+        """Keep the final hours' field chunks in ``cache`` (see the class docstring)."""
+        arrays = {*self.fields.values(), "time"}  # past time chunks never change either
+        stores = [(self.store, arrays)]
+        if self.surface_pressure is not None:
+            sp = self.surface_pressure
+            if sp.store is self.store:
+                arrays.add(sp.array)
+            else:
+                stores.append((sp.store, {sp.array}))
+        for zarr, names in stores:
+            inner = zarr.store.inner if isinstance(zarr.store, CachedStore) else zarr.store
+            final = _final_keys(zarr, names, self.final_after)
+            zarr.store = CachedStore(inner, cache, namespace_for(inner.location), final)
 
     def cube_keys(self, t0: np.datetime64) -> tuple[CubeKey, CubeKey]:
         """Analyses at ``t0`` and one hour later (no run: reanalysis)."""
@@ -206,6 +260,28 @@ def _hour_epoch(units: str) -> np.datetime64:
         raise ValueError(f"unsupported time units {units!r}; expected 'hours since ...'")
     stamp = datetime.fromisoformat(f"{m.group(1)}T{m.group(2) or '00:00'}")
     return np.datetime64(stamp, "h")
+
+
+def _final_keys(
+    zarr: ZarrStore, arrays: set[str], final_after: np.timedelta64
+) -> Callable[[str], bool]:
+    """Predicate: is ``key`` a chunk of ``arrays`` whose hours are all final (immutable)?"""
+    epoch = _hour_epoch(zarr.array("time").attrs.get("units", ""))
+    t0 = int(zarr.read_1d("time", 0, 1)[0])
+    time_chunks = {name: zarr.array(name).chunks[0] for name in arrays}
+
+    def final(key: str) -> bool:
+        """True for an immutable chunk key."""
+        name, _, index = key.partition("/")
+        if name not in time_chunks or not index:
+            return False
+        first = re.split(r"[./]", index, maxsplit=1)[0]
+        if not first.isdigit():
+            return False
+        last_hour = epoch + np.timedelta64(t0 + (int(first) + 1) * time_chunks[name] - 1, "h")
+        return bool(last_hour < np.datetime64("now", "h") - final_after)
+
+    return final
 
 
 def _open(url: str) -> ZarrStore:

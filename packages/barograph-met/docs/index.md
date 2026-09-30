@@ -14,7 +14,7 @@ longitude and barometric altitude — from:
 ```python
 from baro.met import Enricher, arco_model_levels
 
-res = Enricher(arco_model_levels(), cache_dir="~/data/cubes").enrich(
+res = Enricher(arco_model_levels(), cache_dir="~/data/era5-cache").enrich(
     time_utc, lat, lon, altitude_ft=baro_alt_ft
 )
 res["u"], res["v"], res["t"], res.flags, res.stats

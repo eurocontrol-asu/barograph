@@ -11,6 +11,7 @@ import pytest
 from baro.met import Enricher, Flag
 from baro.met.enrich import UncoveredPointsWarning
 from baro.met.openmeteo import OpenMeteoSource
+from baro.met.rangecache import RangeCache
 from synthetic import EPOCH, OM_MODEL, truth, write_openmeteo_mirror
 
 pytestmark = pytest.mark.integration
@@ -70,3 +71,13 @@ def test_points_after_the_archive_are_flagged(mirror: Path) -> None:
 def test_unknown_variable_is_rejected(mirror: Path) -> None:
     with pytest.raises(ValueError, match="unknown variables"):
         OpenMeteoSource(OM_MODEL, base_url=str(mirror), fields={"x": "nope"})
+
+
+def test_tiles_and_immutable_chunks(mirror: Path, tmp_path: Path) -> None:
+    with OpenMeteoSource(OM_MODEL, base_url=str(mirror), tile_deg=2.0) as src:
+        tiling = src.tiling(src.cube_keys(EPOCH)[0])
+        assert tiling is not None and tiling.lon_step == pytest.approx(tiling.lat_step)
+        src.use_cache(RangeCache(tmp_path))
+        assert src.reader.disk is not None and src.reader.disk.cacheable("x/chunk_0.om")
+        assert not src.reader.disk.cacheable("x/chunk_99999999.om")  # still being rewritten
+        assert not src.reader.disk.cacheable("data/model/static/meta.json")

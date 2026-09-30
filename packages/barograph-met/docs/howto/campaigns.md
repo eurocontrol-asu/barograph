@@ -1,25 +1,36 @@
-# Campaigns: cache, domains and parallelism
+# Campaigns: cache, fleets and parallelism
 
-## Enrich many flights at once
+## One flight or a fleet: the cost is the area covered
 
-Pass the points of **all** flights to one `enrich` call: each time slice is
-read once for every flight that crosses it.
+`enrich` works on points, not flights. The points of each time slice are split
+along the source's own storage tiling (latitude bands of Blosc blocks for
+ARCO-ERA5, square tiles for the Open-Meteo archive): touching occupied tiles
+form one cube, distant groups get their own. What is downloaded is the set of
+tiles the traffic actually crosses, whatever the number of flights. Passing a
+whole fleet in one call is simplest; splitting it into calls costs the same
+with a cache (below).
 
 ## A shared, reusable cache
 
 ```python
-from baro.met import Domain, Enricher, arco_model_levels
+from baro.met import Enricher, arco_model_levels
 
-europe = Domain(lat_min=30, lat_max=72, lon_min=-20, lon_max=45)
-enricher = Enricher(arco_model_levels(), cache_dir="/shared/cubes", domain=europe)
+enricher = Enricher(arco_model_levels(), cache_dir="/shared/era5-cache")
 ```
 
-- A fixed `domain` makes every cube cover the same box, so later runs and
-  other experiments reuse them.
-- `mode="global"` reads whole fields on every level (FastMeteo-like cost): one
-  cache then serves any flight.
-- The cache is immutable and written atomically; a per-slot lock lets several
-  processes share it and never download the same cube twice.
+- Every byte read from a remote object is kept on disk, in the source's own
+  units (runs of Blosc blocks, GRIB messages, `.om` pages). A later call only
+  downloads the ranges no earlier call has read: flight by flight, a fleet at
+  once, in any order, from several processes.
+- Only immutable data is kept: ERA5 hours older than about three months (the
+  preliminary ERA5T may still be replaced), ARPEGE files of a published run,
+  Open-Meteo chunks older than a week (recent hours are rewritten by newer
+  runs). Store metadata is always re-read.
+- Extents are written atomically and never modified; a lock per unit of work
+  lets several processes share the cache without downloading the same bytes
+  twice.
+- A fixed `domain=` still forces one box per time slice, and `mode="global"`
+  reads whole fields on every level (FastMeteo-like cost).
 
 ## Parallelism and politeness
 

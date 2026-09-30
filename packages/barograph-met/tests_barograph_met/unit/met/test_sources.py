@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
 from baro.met import CubeKey, DataUnavailableError, Domain, pressure_levels
+from baro.met.rangecache import CachedStore, RangeCache
 from baro.met.sources import GridSource
 from baro.met.store import ZarrStore
 from synthetic import ArraySpec, memory_zarr
@@ -83,3 +86,22 @@ def test_hours_outside_the_axis_are_unavailable() -> None:
 def test_levels_missing_from_the_store_are_rejected() -> None:
     with pytest.raises(ValueError, match="not in the store"):
         _source([200, 850])
+
+
+def test_only_final_field_and_time_chunks_are_cached(tmp_path: Path) -> None:
+    src = _source()
+    src.use_cache(RangeCache(tmp_path))
+    store = src.store.store
+    assert isinstance(store, CachedStore)
+    assert store.cacheable("temperature/0.0.0.0") and store.cacheable("time/0")
+    assert not store.cacheable(".zmetadata") and not store.cacheable("latitude/0")
+    assert not store.cacheable("temperature/") and not store.cacheable("unknown/0.0.0.0")
+    recent = _source()
+    recent.final_after = np.timedelta64(1_000_000, "D")  # everything still "ERA5T"
+    recent.use_cache(RangeCache(tmp_path))
+    assert not recent.store.store.cacheable("temperature/0.0.0.0")  # type: ignore[attr-defined]
+
+
+def test_tiling_follows_the_blosc_bands() -> None:
+    tiling = _source().tiling(CubeKey(np.datetime64("1900-02-11T00", "h")))
+    assert tiling is None or (tiling.lon_step is None and tiling.lat0 <= float(LAT.min()))

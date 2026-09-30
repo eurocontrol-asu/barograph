@@ -20,7 +20,9 @@ from numpy.typing import NDArray
 
 from baro.met.base import CubeKey, DataUnavailableError
 from baro.met.domain import Cube, Domain
+from baro.met.rangecache import RangeCache
 from baro.met.store import MissingChunkError, TransferStats
+from baro.met.tiling import Tiling
 from baro.met.vertical import model_levels
 
 EPOCH = np.datetime64("2020-01-01T00", "h")
@@ -140,6 +142,7 @@ class MemoryStore:
     def __init__(self, objects: dict[str, bytes]) -> None:
         self.objects = objects
         self.stats = TransferStats()
+        self.location = f"memory://{id(self)}"
 
     def get(self, key: str, start: int | None = None, stop: int | None = None) -> bytes:
         if key not in self.objects:
@@ -179,6 +182,9 @@ class FakeSource:
         self.span = (EPOCH + span_h[0] * h, EPOCH + span_h[1] * h)
         self.make = make
         self.fetched: list[CubeKey] = []
+        self.domains: list[Domain] = []
+        self.tiles: Tiling | None = None
+        self.cache: RangeCache | None = None
 
     @property
     def stats(self) -> list[TransferStats]:
@@ -186,6 +192,12 @@ class FakeSource:
 
     def coverage(self) -> tuple[np.datetime64, np.datetime64]:
         return self.span
+
+    def tiling(self, key: CubeKey) -> Tiling | None:
+        return self.tiles
+
+    def use_cache(self, cache: RangeCache) -> None:
+        self.cache = cache
 
     def cube_keys(self, t0: np.datetime64) -> tuple[CubeKey, CubeKey]:
         h = np.datetime64(t0, "h")
@@ -203,6 +215,7 @@ class FakeSource:
         if not self.span[0] <= key.valid <= self.span[1]:
             raise DataUnavailableError(str(key))
         self.fetched.append(key)
+        self.domains.append(domain)
         cube = self.make(hour=key.valid)
         cube.fields = {k: np.full_like(v, self.value) for k, v in cube.fields.items()}
         cube.source = self.source_id

@@ -1,4 +1,4 @@
-"""Two processes enrich the same flight with one shared cube cache."""
+"""Two processes enrich the same flight with one shared byte cache."""
 
 from __future__ import annotations
 
@@ -30,24 +30,31 @@ t = np.datetime64("2020-01-01T00:10") + (np.linspace(0, 100, n) * 60).astype("ti
 res = Enricher(source, cache_dir=cache).enrich(
     t, np.linspace(42, 48, n), np.linspace(21, 33, n), pressure_pa=np.linspace(85000, 22000, n)
 )
-print(json.dumps({"fetched": res.stats["fetched"], "hits": res.stats["cache_hits"],
-                  "ok": int((res.flags == 0).sum())}))
+print(json.dumps({"bytes": res.stats["bytes"], "ok": int((res.flags == 0).sum())}))
 """
 
 
-def test_processes_share_the_cache_without_duplicate_downloads(tmp_path: Path) -> None:
-    ml, pl = write_stores(tmp_path / "stores", n_hours=3)
-    cache = tmp_path / "cubes"
+def _run(ml: Path, pl: Path, cache: Path, n: int) -> list[dict[str, int]]:
     procs = [
         subprocess.Popen(  # noqa: S603 - fixed interpreter and script
             [sys.executable, "-c", SCRIPT, str(ml), str(pl), str(cache)],
             stdout=subprocess.PIPE,
             text=True,
         )
-        for _ in range(2)
+        for _ in range(n)
     ]
     outs = [json.loads(p.communicate(timeout=120)[0]) for p in procs]
     assert all(p.returncode == 0 for p in procs)
-    assert all(o["ok"] == 200 for o in outs)
-    assert sum(o["fetched"] for o in outs) == 3  # each hourly cube downloaded once in total
-    assert sum(o["hits"] for o in outs) == 3
+    return outs
+
+
+def test_processes_share_the_cache_without_duplicate_downloads(tmp_path: Path) -> None:
+    ml, pl = write_stores(tmp_path / "stores", n_hours=3)
+    (alone,) = _run(ml, pl, tmp_path / "alone", 1)
+    pair = _run(ml, pl, tmp_path / "shared", 2)
+    assert all(o["ok"] == 200 for o in [alone, *pair])
+    # only tiny metadata reads made before any claim may race (time axis, header probe)
+    overhead = (ml / "time" / "0").stat().st_size + 4096
+    assert alone["bytes"] <= sum(o["bytes"] for o in pair) <= alone["bytes"] + 2 * overhead
+    (later,) = _run(ml, pl, tmp_path / "shared", 1)
+    assert later["bytes"] == 0
