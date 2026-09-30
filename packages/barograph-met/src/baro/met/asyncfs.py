@@ -23,7 +23,7 @@ import httpx
 
 from baro.met.limits import async_slot
 from baro.met.rangecache import RangeCache, namespace_for
-from baro.met.store import TransferStats
+from baro.met.store import USER_AGENT, TransferStats
 
 __all__ = ["REVALIDATE_S", "DiskPages", "LocalAsyncFS", "PagedAsyncFS"]
 
@@ -63,6 +63,7 @@ class PagedAsyncFS:
             timeout=120.0,
             follow_redirects=True,
             limits=httpx.Limits(max_connections=max_connections),
+            headers={"User-Agent": USER_AGENT},
         )
         self._pages: OrderedDict[tuple[str, str, int], bytes] = OrderedDict()
         self._inflight: dict[tuple[str, str, int], asyncio.Future[bytes]] = {}

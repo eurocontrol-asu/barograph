@@ -32,7 +32,14 @@ from baro.met.base import CubeKey, DataUnavailableError
 from baro.met.domain import Cube, Domain, GridIndex
 from baro.met.grib import GribIndex, GribIndexStore, decode_message, fetch_messages
 from baro.met.rangecache import CachedStore, RangeCache, namespace_for
-from baro.met.store import ByteStore, FileStore, HttpStore, MissingChunkError, TransferStats
+from baro.met.store import (
+    ByteStore,
+    FileStore,
+    HttpStore,
+    MissingChunkError,
+    TransferStats,
+    list_s3,
+)
 from baro.met.tiling import Tiling
 from baro.met.vertical import (
     MIN_LEVELS,
@@ -171,13 +178,8 @@ class ArpegeSource:
         if self._local_root is not None:
             names = [p.name for p in self._local_root.iterdir() if p.is_dir()]
         elif self.listing_url is not None:
-            resp = httpx.get(
-                self.listing_url,
-                params={"prefix": "pnt/", "delimiter": "/", "max-keys": "1000"},
-                timeout=60.0,
-            )
-            resp.raise_for_status()
-            names = re.findall(r"<Prefix>pnt/([^<]+)/</Prefix>", resp.text)
+            listed = list_s3(self.listing_url, "pnt/", dirs=True, stats=self.store.stats)
+            names = [name.removeprefix("pnt/").rstrip("/") for name in listed]
         else:
             return []
         runs = sorted({np.datetime64(m[1], "h") for n in names if (m := _RUN_PREFIX.fullmatch(n))})
