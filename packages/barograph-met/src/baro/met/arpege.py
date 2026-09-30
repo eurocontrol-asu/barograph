@@ -29,6 +29,7 @@ import httpx
 import numpy as np
 
 from baro.met.base import CubeKey, DataUnavailableError
+from baro.met.common import Lru
 from baro.met.domain import Cube, Domain, GridIndex
 from baro.met.grib import GribIndex, GribIndexStore, decode_message, fetch_messages
 from baro.met.rangecache import CachedStore, RangeCache, namespace_for
@@ -152,7 +153,7 @@ class ArpegeSource:
         self.listing_url = listing_url
         self._local_root = Path(base_url) if is_local else None
         self._coverage: tuple[float, tuple[np.datetime64, np.datetime64] | None] | None = None
-        self._exists: dict[str, tuple[bool, float]] = {}  # published?, checked at
+        self._exists: Lru[str, tuple[bool, float]] = Lru(4096)  # published?, checked at
         self._lock = threading.Lock()
 
     @property

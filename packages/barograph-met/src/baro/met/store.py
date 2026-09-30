@@ -12,9 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import re
-import tempfile
 import threading
 import time
 from collections.abc import Callable, Sequence
@@ -37,6 +35,7 @@ from baro.met.blosc import (
     header_prefix_size,
     parse_header,
 )
+from baro.met.common import Lru
 from baro.met.limits import slot
 
 __all__ = [
@@ -49,10 +48,10 @@ __all__ = [
     "TransferStats",
     "ZarrStore",
     "list_s3",
-    "write_atomic",
 ]
 
 _PREFIX_GUESS = 4096
+_MAX_HEADERS = 4096  # Blosc headers kept in memory (a few KiB each)
 _FORGET_REDIRECT = frozenset({HTTPStatus.FORBIDDEN, HTTPStatus.NOT_FOUND, HTTPStatus.GONE})
 
 
@@ -290,31 +289,6 @@ class FileStore:
             raise MissingChunkError(key) from exc
 
 
-def write_atomic(path: Path, data: bytes) -> None:
-    """Write ``path`` durably: temporary file, fsync, rename, fsync of the directory.
-
-    Readers never see a partial file, and after a crash the file is either
-    absent or complete (a rename alone may leave an empty file on some
-    filesystems after a power loss).
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp-")
-    try:
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(data)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp, path)
-    except BaseException:
-        Path(tmp).unlink(missing_ok=True)
-        raise
-    folder = os.open(path.parent, os.O_RDONLY)
-    try:
-        os.fsync(folder)
-    finally:
-        os.close(folder)
-
-
 @dataclass(frozen=True)
 class ArrayMeta:
     """Metadata of one zarr-v2 array."""
@@ -355,7 +329,7 @@ class ZarrStore:
         self.full_read_ratio = full_read_ratio
         meta = json.loads(store.get(".zmetadata"))["metadata"]
         self._meta = meta
-        self._headers: dict[str, BloscHeader | None] = {}
+        self._headers: Lru[str, BloscHeader | None] = Lru(_MAX_HEADERS)
         self._lock = threading.Lock()
 
     @property
@@ -457,7 +431,7 @@ class ZarrStore:
             raise NotImplementedError(f"{name}: lat/lon must be unchunked")
         r0, r1, _ = rows.indices(meta.shape[-2])
         by_chunk = _plan_slabs(meta, lead, r0, r1)
-        out = np.empty((len(lead), r1 - r0, meta.shape[-1]), dtype=np.float32)
+        out = np.full((len(lead), r1 - r0, meta.shape[-1]), np.nan, dtype=np.float32)
 
         chunks = list(by_chunk)
         headers = _map(executor, lambda c: self._safe_header(meta, meta.chunk_key(c)), chunks)
