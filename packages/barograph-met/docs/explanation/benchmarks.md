@@ -1,5 +1,7 @@
 # Benchmarks
 
+## One flight
+
 Same points for every tool, cold cache (first run), through a corporate HTTPS
 proxy; warm = second run with the tool's own cache.
 
@@ -17,8 +19,33 @@ ERA5 rows: one 2 h flight trajectory from the surface to FL350 (1 764 points,
 points, run 2026-05-11 00 UTC). Network time dominates (> 98 % of the cold
 time); decoding and interpolation take well under a second.
 
-> **Scope: one flight.** These figures compare a single trajectory. With many
-> flights on the same day, tools that download whole global fields (FastMeteo,
-> pycontrails) amortise them across flights, while barograph-met reads more
-> bands as flights spread out, so the gap narrows. A multi-flight benchmark
-> (1 to 1 000 flights on one day) is planned.
+## A worldwide fleet
+
+1 000 flights of 18 June 2025 sampled from OpenSky across all ICAO regions
+(550 000 points every 10 s, surface to FL410), added in steps of 1, 10, 100
+and 1 000 flights to each tool's own cache. Cumulative cost from a cold cache:
+
+| Flights | FastMeteo, ERA5 22 PL | barograph-met, same | pycontrails, ERA5 ML | barograph-met, ML137 |
+|---:|---:|---:|---:|---:|
+| 1 | 330 s, 3.6 GB | **15 s, 0.09 GB** | 753 s, 13.0 GB | **34 s, 0.27 GB** |
+| 10 | 680 s, 7.5 GB | **85 s, 0.84 GB** | 1 642 s, 27.2 GB | **215 s, 2.8 GB** |
+| 100 | 740 s, 8.1 GB | **225 s, 2.8 GB** | 1 852 s, 29.6 GB | **634 s, 9.9 GB** |
+| 1 000 | 744 s, 8.1 GB | **302 s, 3.6 GB** | 1 893 s, 29.6 GB | **900 s, 14.6 GB** |
+| Peak RAM | 5.8 GB | **1.5 GB** | 39 GB | **3.8 GB** |
+
+FastMeteo and pycontrails download whole global fields for every hour they
+need: their cost jumps to a full day as soon as the flights cover it, then
+stays flat. barograph-met reads only the latitude bands and levels the
+flights cross, so its cost grows with the area covered and levels off; with
+1 000 flights spread over the globe it still downloads 2.3× (PL) and 2×
+(ML) less. Values over the 545 000 comparable points: identical to
+FastMeteo (99th percentile of |Δ| < 2e-8) except where FastMeteo extrapolates
+at the Greenwich seam; versus pycontrails RMS 0.037 m/s (u, v) and 0.021 K (T),
+99th percentile 0.15 m/s and 0.08 K. Points below the lowest level or with
+invalid altitudes (0.8 %) are flagged rather than extrapolated.
+
+Protocol: flights in a fixed random order (seed 0), each step enriching only
+the flights added since the previous one with a persistent cache, as a
+campaign grows; pycontrails' pressure levels are fixed once for the fleet's
+altitude range (its cache key includes them). Sample and scripts:
+`fetch_world_sample.py`, `run_fleet.py`, `report_fleet.py` (paper repository).
