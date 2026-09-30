@@ -1,8 +1,8 @@
 [project]
-name = "supertraj-workspace"
+name = "barograph-workspace"
 version = "0.0.0"
 requires-python = ">=3.12"
-description = "supertraj workspace — weather along aircraft trajectories"
+description = "barograph workspace — weather along aircraft trajectories"
 license = "EUPL-1.2"
 license-files = ["LICENSE"]
 readme = "README.md"
@@ -14,12 +14,12 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
 ]
-dependencies = ["supertraj-met[grib,pandas,openmeteo]"]
+dependencies = ["barograph-met[grib,pandas,openmeteo]"]
 
 [project.urls]
-Homepage = "https://asu-eurocontrol.github.io/supertraj/"
-Repository = "https://github.com/asu-eurocontrol/supertraj"
-Documentation = "https://asu-eurocontrol.github.io/supertraj/"
+Homepage = "https://asu-eurocontrol.github.io/barograph/"
+Repository = "https://github.com/asu-eurocontrol/barograph"
+Documentation = "https://asu-eurocontrol.github.io/barograph/"
 
 [dependency-groups]
 dev = [
@@ -60,13 +60,13 @@ constraint-dependencies = [
 members = ["packages/*"]
 
 [tool.uv.sources]
-supertraj-met = { workspace = true }
+barograph-met = { workspace = true }
 
 [tool.pytest.ini_options]
 # Replicated from the member configs: a ROOT run is driven by this file.
 import_mode = "importlib"
-testpaths = ["packages/supertraj-met/tests_supertraj_met"]
-pythonpath = ["packages/supertraj-met/src", "packages/supertraj-met/tests_supertraj_met"]
+testpaths = ["packages/barograph-met/tests_barograph_met"]
+pythonpath = ["packages/barograph-met/src", "packages/barograph-met/tests_barograph_met"]
 addopts = ["--import-mode=importlib", "-m", "not live"]
 markers = [
     "integration: real I/O against local stores or mirrors",

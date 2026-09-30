@@ -11,15 +11,15 @@ repos:
   # on push by `make lint`.
   - repo: local
     hooks:
-      - id: mypy-supertraj-met
-        name: mypy (supertraj-met)
-        entry: uv run --package supertraj-met mypy --config-file packages/supertraj-met/pyproject.toml
+      - id: mypy-barograph-met
+        name: mypy (barograph-met)
+        entry: uv run --package barograph-met mypy --config-file packages/barograph-met/pyproject.toml
         language: system
         types: [python]
-        files: ^packages/supertraj-met/
+        files: ^packages/barograph-met/
         pass_filenames: false
         stages: [pre-commit]
-        args: [packages/supertraj-met/src/, packages/supertraj-met/tests_supertraj_met/]
+        args: [packages/barograph-met/src/, packages/barograph-met/tests_barograph_met/]
       - id: mypy-all
         name: mypy (ALL packages — pre-push)
         entry: make lint

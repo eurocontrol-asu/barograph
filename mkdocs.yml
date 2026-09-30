@@ -1,8 +1,8 @@
-site_name: supertraj
+site_name: barograph
 site_description: Weather along aircraft trajectories — fast ERA5 and ARPEGE retrieval at aircraft positions.
-site_url: https://asu-eurocontrol.github.io/supertraj/
-repo_url: https://github.com/asu-eurocontrol/supertraj
-repo_name: asu-eurocontrol/supertraj
+site_url: https://asu-eurocontrol.github.io/barograph/
+repo_url: https://github.com/asu-eurocontrol/barograph
+repo_name: asu-eurocontrol/barograph
 copyright: Copyright &copy; 2026 Gabriel Jarry — EUPL-1.2
 
 theme:
@@ -42,7 +42,7 @@ nav:
     - index.md
   - Packages:
     - packages/index.md
-    - supertraj-met: '!include ./packages/supertraj-met/mkdocs.yml'
+    - barograph-met: '!include ./packages/barograph-met/mkdocs.yml'
   - Contributing:
     - contributing.md
     - Module Reference: reference/index.md
@@ -61,7 +61,7 @@ plugins:
       handlers:
         python:
           paths:
-            - packages/supertraj-met/src
+            - packages/barograph-met/src
           options:
             docstring_style: numpy
             show_root_heading: true

@@ -15,11 +15,11 @@ updates:
   # constraint-dependencies; a member floor above the pin would make the
   # workspace unsolvable, so they are bumped by hand at the root.
   - package-ecosystem: uv
-    directory: /packages/supertraj-met
+    directory: /packages/barograph-met
     schedule:
       interval: weekly
     groups:
-      supertraj-met:
+      barograph-met:
         patterns:
           - "*"
     ignore:

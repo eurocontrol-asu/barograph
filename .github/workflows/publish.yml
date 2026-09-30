@@ -3,7 +3,7 @@ name: Publish to PyPI
 on:
   push:
     # Long tag convention: the prefix is the package directory
-    # (supertraj-met/v0.1.0 -> packages/supertraj-met), so a new package
+    # (barograph-met/v0.1.0 -> packages/barograph-met), so a new package
     # needs no CI change — only a tag.
     tags:
       - "*/v*"

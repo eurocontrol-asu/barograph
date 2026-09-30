@@ -1,13 +1,13 @@
 <p align="center">
-  <img src="assets/logo.svg" alt="supertraj" width="120" />
+  <img src="assets/logo.svg" alt="barograph" width="120" />
 </p>
 
-<h1 align="center">supertraj</h1>
+<h1 align="center">barograph</h1>
 <p align="center"><strong>Weather along aircraft trajectories.</strong></p>
 
-supertraj is a uv workspace of Python packages that attach meteorological
+barograph is a uv workspace of Python packages that attach meteorological
 information to aircraft trajectories (ADS-B, flight data). Its first package,
-[supertraj-met](met/index.md), retrieves wind and temperature at aircraft
+[barograph-met](met/index.md), retrieves wind and temperature at aircraft
 positions from ERA5 and Météo-France ARPEGE:
 
 - **fast** — only the bytes a flight needs are downloaded (partial reads of
@@ -23,6 +23,6 @@ positions from ERA5 and Météo-France ARPEGE:
 
 | Package | Role |
 |---|---|
-| [supertraj-met](met/index.md) | Retrieval and interpolation of ERA5, ARPEGE and Open-Meteo archives at aircraft positions |
+| [barograph-met](met/index.md) | Retrieval and interpolation of ERA5, ARPEGE and Open-Meteo archives at aircraft positions |
 
 Licensed under the [EUPL-1.2](https://eupl.eu/1.2/en/).
