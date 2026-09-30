@@ -83,6 +83,13 @@ _GRID, _PRODUCT, _REPRESENTATION = 3, 4, 5
 _MISSING_OCTET = 255
 
 
+def _signed(raw: bytes) -> int:
+    """GRIB2 signed integer: sign-and-magnitude (top bit is the sign), not two's complement."""
+    value = int.from_bytes(raw, "big")
+    top = 1 << (8 * len(raw) - 1)
+    return -(value & (top - 1)) if value & top else value
+
+
 def _grid_section(sec: bytes, info: dict[str, Any]) -> None:
     info["npoints"] = struct.unpack(">I", sec[6:10])[0]
     info["grid_template"] = struct.unpack(">H", sec[12:14])[0]
@@ -94,8 +101,8 @@ def _product_section(sec: bytes, info: dict[str, Any]) -> None:
     unit = sec[17]
     info["step_h"] = struct.unpack(">i", sec[18:22])[0] * _TIME_UNITS_H.get(unit, np.nan)
     info["level_type"] = sec[22]
-    scale = struct.unpack(">b", sec[23:24])[0]
-    value = struct.unpack(">i", sec[24:28])[0]
+    scale = _signed(sec[23:24])
+    value = _signed(sec[24:28])
     missing = sec[23] == _MISSING_OCTET
     info["level"] = float("nan") if missing else float(value) * 10.0 ** (-scale)
 

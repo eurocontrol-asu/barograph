@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import tempfile
 import threading
 import time
@@ -39,6 +40,7 @@ from baro.met.blosc import (
 from baro.met.limits import slot
 
 __all__ = [
+    "USER_AGENT",
     "ArrayMeta",
     "ByteStore",
     "FileStore",
@@ -46,10 +48,25 @@ __all__ = [
     "MissingChunkError",
     "TransferStats",
     "ZarrStore",
+    "list_s3",
     "write_atomic",
 ]
 
 _PREFIX_GUESS = 4096
+_FORGET_REDIRECT = frozenset({HTTPStatus.FORBIDDEN, HTTPStatus.NOT_FOUND, HTTPStatus.GONE})
+
+
+def _user_agent() -> str:
+    try:
+        from importlib.metadata import version
+
+        release = version("barograph-met")
+    except Exception:  # noqa: BLE001 - metadata missing in odd installs: stay anonymous-ish
+        release = "unknown"
+    return f"barograph-met/{release} (+https://github.com/eurocontrol-asu/barograph)"
+
+
+USER_AGENT = _user_agent()  # identifies us to the data providers' operators
 _RETRY_STATUS = frozenset({429, 500, 502, 503, 504})
 _log = logging.getLogger("baro.met.http")
 
@@ -124,7 +141,12 @@ class HttpStore:
         limits = httpx.Limits(
             max_connections=max_connections, max_keepalive_connections=max_connections
         )
-        self.client = client or httpx.Client(timeout=timeout, follow_redirects=True, limits=limits)
+        self.client = client or httpx.Client(
+            timeout=timeout,
+            follow_redirects=True,
+            limits=limits,
+            headers={"User-Agent": USER_AGENT},
+        )
         self.retries = retries
         self.backoff = backoff
         self.stats = TransferStats()
@@ -134,13 +156,17 @@ class HttpStore:
         return f"{self._base}/{key}"
 
     def _learn_redirect(self, resp: httpx.Response, key: str) -> None:
-        """Remember a permanent host redirect (e.g. data.gouv.fr -> object storage).
+        """Remember a host redirect (e.g. data.gouv.fr -> object storage).
 
-        Only a redirect that preserves the object path is learnt, so every later
-        request goes straight to the target instead of paying one extra round trip.
+        Only a redirect that preserves the object path and carries no query
+        (signed URLs expire) is learnt, so later requests go straight to the
+        target instead of paying one extra round trip. If the learnt host later
+        refuses a request, the original base URL is used again (see ``_request``).
         """
-        final = unquote(str(resp.url).split("?", 1)[0])  # targets may percent-encode ':'
-        if resp.history and final.endswith("/" + key):
+        if not resp.history or resp.url.query:
+            return
+        final = unquote(str(resp.url))  # targets may percent-encode ':'
+        if final.endswith("/" + key):
             self._base = final[: -len(key) - 1]
 
     def get(self, key: str, start: int | None = None, stop: int | None = None) -> bytes:
@@ -171,6 +197,9 @@ class HttpStore:
                     raise
                 time.sleep(self.backoff * 2**attempt)
                 continue
+            if self._base != self.base_url and resp.status_code in _FORGET_REDIRECT:
+                self._base = self.base_url  # a learnt (temporary) redirect went stale
+                continue
             if resp.status_code == HTTPStatus.NOT_FOUND:
                 raise MissingChunkError(key)
             if resp.status_code in _RETRY_STATUS and attempt < self.retries:
@@ -190,6 +219,43 @@ class HttpStore:
         retry_after = resp.headers.get("retry-after", "")
         delay = float(retry_after) if retry_after.isdigit() else self.backoff * 2**attempt
         time.sleep(min(delay, 60.0))
+
+
+def list_s3(base: str, prefix: str, *, dirs: bool, stats: TransferStats | None = None) -> list[str]:
+    """Keys (``dirs=False``) or sub-folder prefixes (``dirs=True``) under ``prefix``.
+
+    S3 ``ListObjectsV2`` over HTTP, following continuation tokens (a page holds
+    at most 1000 entries), under the per-host concurrency cap.
+    """
+    params = {"list-type": "2", "prefix": prefix, "max-keys": "1000"}
+    if dirs:
+        params["delimiter"] = "/"
+    tag = _COMMON_PREFIX if dirs else _KEY
+    names: list[str] = []
+    url = base.rstrip("/") + "/"
+    while True:
+        t0 = time.perf_counter()
+        with slot(url):
+            resp = httpx.get(
+                url,
+                params=params,
+                timeout=60.0,
+                follow_redirects=True,
+                headers={"User-Agent": USER_AGENT},
+            )
+        resp.raise_for_status()
+        if stats is not None:
+            stats.add(len(resp.content), time.perf_counter() - t0)
+        names += tag.findall(resp.text)
+        token = _NEXT_TOKEN.search(resp.text)
+        if "<IsTruncated>true</IsTruncated>" not in resp.text or token is None:
+            return names
+        params["continuation-token"] = token.group(1)
+
+
+_COMMON_PREFIX = re.compile(r"<CommonPrefixes>\s*<Prefix>([^<]+)</Prefix>")
+_KEY = re.compile(r"<Contents>\s*<Key>([^<]+)</Key>")
+_NEXT_TOKEN = re.compile(r"<NextContinuationToken>([^<]+)</NextContinuationToken>")
 
 
 class FileStore:

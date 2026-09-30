@@ -41,7 +41,7 @@ from baro.met.asyncfs import REVALIDATE_S, DiskPages, LocalAsyncFS, PagedAsyncFS
 from baro.met.base import CubeKey, DataUnavailableError
 from baro.met.domain import Cube, Domain, GridIndex
 from baro.met.limits import run_async
-from baro.met.store import TransferStats
+from baro.met.store import USER_AGENT, TransferStats, list_s3
 from baro.met.tiling import Tiling
 
 if TYPE_CHECKING:
@@ -120,7 +120,12 @@ class ArchiveCatalog:
         if _is_local(self.base):
             return (Path(self.base) / path).read_text()
         t0 = time.perf_counter()
-        resp = httpx.get(f"{self.base}/{path}", timeout=60.0, follow_redirects=True)
+        resp = httpx.get(
+            f"{self.base}/{path}",
+            timeout=60.0,
+            follow_redirects=True,
+            headers={"User-Agent": USER_AGENT},
+        )
         resp.raise_for_status()
         self.stats.add(len(resp.content), time.perf_counter() - t0)
         return resp.text
@@ -132,15 +137,8 @@ class ArchiveCatalog:
             if not folder.is_dir():
                 return []
             return [p.name for p in folder.iterdir() if p.is_dir() == dirs]
-        params = {"list-type": "2", "prefix": prefix, "max-keys": "1000"}
-        if dirs:
-            params["delimiter"] = "/"
-        t0 = time.perf_counter()
-        resp = httpx.get(self.base + "/", params=params, timeout=60.0, follow_redirects=True)
-        resp.raise_for_status()
-        self.stats.add(len(resp.content), time.perf_counter() - t0)
-        tag = r"<Prefix>([^<]+)/</Prefix>" if dirs else r"<Key>([^<]+)</Key>"
-        return [name.rsplit("/", 1)[-1] for name in re.findall(tag, resp.text)]
+        names = list_s3(self.base, prefix, dirs=dirs, stats=self.stats)
+        return [name.rstrip("/").rsplit("/", 1)[-1] for name in names]
 
     def _levels(self, variables: Sequence[str]) -> dict[str, set[int]]:
         found: dict[str, set[int]] = {v: set() for v in variables}

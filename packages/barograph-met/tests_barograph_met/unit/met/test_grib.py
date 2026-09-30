@@ -13,7 +13,7 @@ def _section(number: int, body: bytes) -> bytes:
     return struct.pack(">IB", 5 + len(body), number) + body
 
 
-def _message(level_pa: int = 25000, step: int = 3) -> bytes:
+def _message(level_pa: int = 25000, step: int = 3, scale: bytes = b"\x00") -> bytes:
     grid = _section(3, b"\x00" + struct.pack(">I", 386061) + b"\x00\x00" + struct.pack(">H", 0))
     product = _section(
         4,
@@ -22,7 +22,8 @@ def _message(level_pa: int = 25000, step: int = 3) -> bytes:
         + b"\x00" * 6  # octets 12-17
         + bytes([1])  # octet 18: time unit = hour
         + struct.pack(">i", step)
-        + bytes([100, 0])  # isobaric surface, scale 0
+        + bytes([100])  # isobaric surface
+        + scale  # scale factor of the level (sign-and-magnitude)
         + struct.pack(">i", level_pa),
     )
     representation = _section(5, struct.pack(">I", 386061) + struct.pack(">H", 42))
@@ -62,3 +63,9 @@ def test_index_queries_and_round_trip() -> None:
     assert idx.steps() == [0.0, 1.0]
     back = GribIndex.from_json(idx.to_json())
     assert back.messages == msgs and back.find((0, 2, 2), 100, 20000.0, 0.0) == msgs[0]
+
+
+def test_signed_fields_use_sign_and_magnitude() -> None:
+    # scale factor -1 is 0x81 in GRIB2 (two's complement would read -127)
+    msg = parse_header(_message(level_pa=2500, scale=b"\x81"), offset=0)
+    assert msg.level == pytest.approx(25000.0)
