@@ -78,3 +78,19 @@ def test_concurrent_readers_of_one_range_download_it_once(tmp_path: Path) -> Non
     with ThreadPoolExecutor(4) as ex:
         full = list(ex.map(lambda _: store.get("a/0.0"), range(8)))
     assert all(f == BLOB for f in full) and inner.stats.bytes == 8900 + len(BLOB)
+
+
+def test_a_damaged_extent_is_dropped_and_fetched_again(tmp_path: Path) -> None:
+    store, inner = _store(tmp_path)
+    store.get("a/0.0", 0, 4000)
+    (extent,) = store.cache.object_dir("ns", "a/0.0").glob("0-4000.bin")
+    extent.write_bytes(BLOB[:1000])  # truncated, as a crash may leave it
+    assert store.get("a/0.0", 0, 4000) == BLOB[:4000]
+    assert inner.stats.bytes == 8000 and extent.stat().st_size == 4000
+
+
+def test_an_oversized_answer_is_never_cached(tmp_path: Path) -> None:
+    cache = RangeCache(tmp_path)
+    with pytest.raises(ValueError, match="asked for 10 bytes"):
+        cache.get("ns", "k", 0, 10, lambda a, b: BLOB)  # e.g. a server ignoring Range
+    assert cache.lookup("ns", "k", 0, 10) is None

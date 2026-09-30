@@ -143,6 +143,7 @@ class ArpegeSource:
         self._local_root = Path(base_url) if is_local else None
         self._coverage: tuple[float, tuple[np.datetime64, np.datetime64] | None] | None = None
         self._indexes: dict[str, GribIndex] = {}
+        self._building: dict[str, threading.Lock] = {}
         self._exists: dict[str, bool] = {}
         self._lock = threading.Lock()
 
@@ -265,25 +266,47 @@ class ArpegeSource:
         return CubeKey(t0h, run), CubeKey(t0h + self.time_step, run)
 
     def index(self, key: str, executor: Executor | None = None) -> GribIndex:
-        """Message index of ``key``: memory, then the on-disk cache, else built and saved."""
+        """Message index of ``key``: memory, then the on-disk cache, else built and saved.
+
+        Built once per process even when several cubes of the same file are
+        fetched at the same time; a damaged or stale saved index is rebuilt.
+        """
         with self._lock:
             if key in self._indexes:
                 return self._indexes[key]
-        path = None
-        if self.index_dir is not None:
-            digest = hashlib.sha256(key.encode()).hexdigest()[:24]
-            path = self.index_dir / self.source_id / f"{digest}.json"
-        idx = None
-        if path is not None and path.exists():
+            gate = self._building.setdefault(key, threading.Lock())
+        with gate:
+            with self._lock:
+                if key in self._indexes:
+                    return self._indexes[key]
+            idx = self._saved_index(key)
+            if idx is None:
+                idx = GribIndex.build(self.store, key, executor=executor)
+                if self.index_dir is not None:
+                    idx.save(self._index_path(key))
+            with self._lock:
+                self._indexes[key] = idx
+                self._building.pop(key, None)
+        return idx
+
+    def _index_path(self, key: str) -> Path:
+        assert self.index_dir is not None
+        digest = hashlib.sha256(key.encode()).hexdigest()[:24]
+        return self.index_dir / self.source_id / f"{digest}.json"
+
+    def _saved_index(self, key: str) -> GribIndex | None:
+        """The index saved for ``key``, if it is intact and still matches the file."""
+        if self.index_dir is None:
+            return None
+        path = self._index_path(key)
+        try:
             idx = GribIndex.from_json(path.read_text())
-            if idx.key != key or idx.size != self.store.size(key):
-                idx = None  # stale or colliding entry: rebuild
-        if idx is None:
-            idx = GribIndex.build(self.store, key, executor=executor)
-            if path is not None:
-                idx.save(path)
-        with self._lock:
-            self._indexes[key] = idx
+        except FileNotFoundError:
+            return None
+        except (ValueError, KeyError, TypeError):  # damaged (e.g. by a crash): rebuild
+            return None
+        if idx.key != key or idx.size != self.store.size(key):
+            return None  # stale or colliding entry
         return idx
 
     # -- cubes ---------------------------------------------------------------------------------

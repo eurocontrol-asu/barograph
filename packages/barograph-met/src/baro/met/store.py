@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import tempfile
 import threading
 import time
 from collections.abc import Callable, Sequence
@@ -44,6 +46,7 @@ __all__ = [
     "MissingChunkError",
     "TransferStats",
     "ZarrStore",
+    "write_atomic",
 ]
 
 _PREFIX_GUESS = 4096
@@ -219,6 +222,31 @@ class FileStore:
             return (self.root / key).stat().st_size
         except FileNotFoundError as exc:
             raise MissingChunkError(key) from exc
+
+
+def write_atomic(path: Path, data: bytes) -> None:
+    """Write ``path`` durably: temporary file, fsync, rename, fsync of the directory.
+
+    Readers never see a partial file, and after a crash the file is either
+    absent or complete (a rename alone may leave an empty file on some
+    filesystems after a power loss).
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp-")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+    folder = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(folder)
+    finally:
+        os.close(folder)
 
 
 @dataclass(frozen=True)

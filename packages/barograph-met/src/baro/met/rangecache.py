@@ -30,14 +30,13 @@ import fcntl
 import hashlib
 import os
 import re
-import tempfile
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from baro.met.store import ByteStore, TransferStats
+from baro.met.store import ByteStore, TransferStats, write_atomic
 
 __all__ = ["CacheStats", "CachedStore", "RangeCache", "cover", "namespace_for"]
 
@@ -124,10 +123,12 @@ class RangeCache:
                 hit += b - a
                 continue
             data = fetch(a, b)
+            if len(data) > b - a:
+                raise ValueError(f"{key}: asked for {b - a} bytes at {a}, got {len(data)}")
             self._store(folder, key, a, data)
             pieces.append(data)
             if len(data) < b - a:  # the object ends inside this gap
-                _write_atomic(folder / "size", str(a + len(data)).encode())
+                write_atomic(folder / "size", str(a + len(data)).encode())
                 break
         self.stats.add(hit=hit)
         return b"".join(pieces)
@@ -156,7 +157,7 @@ class RangeCache:
                 return data
             data = fetch_all()
             self._store(folder, key, 0, data)
-            _write_atomic(folder / "size", str(len(data)).encode())
+            write_atomic(folder / "size", str(len(data)).encode())
             return data
 
     def _whole(self, folder: Path) -> bytes | None:
@@ -171,8 +172,8 @@ class RangeCache:
         folder.mkdir(parents=True, exist_ok=True)
         label = folder / "key.txt"
         if not label.exists():
-            _write_atomic(label, key.encode())
-        _write_atomic(folder / f"{start}-{start + len(data)}.bin", data)
+            write_atomic(label, key.encode())
+        write_atomic(folder / f"{start}-{start + len(data)}.bin", data)
         self.stats.add(stored=len(data))
 
 
@@ -235,7 +236,11 @@ def _locked(folder: Path, names: list[str]) -> Iterator[None]:
 
 
 def _extents(folder: Path) -> list[tuple[int, int, Path]]:
-    """Cached extents of an object, sorted by start."""
+    """Cached extents of an object, sorted by start; damaged ones are dropped.
+
+    An extent whose file does not hold exactly ``stop - start`` bytes (e.g.
+    truncated by a crash) is deleted, so its range is simply fetched again.
+    """
     try:
         entries = list(os.scandir(folder))
     except FileNotFoundError:
@@ -243,8 +248,17 @@ def _extents(folder: Path) -> list[tuple[int, int, Path]]:
     found = []
     for entry in entries:
         m = _EXTENT.fullmatch(entry.name)
-        if m is not None:
-            found.append((int(m.group(1)), int(m.group(2)), Path(entry.path)))
+        if m is None:
+            continue
+        a, b = int(m.group(1)), int(m.group(2))
+        try:
+            intact = entry.stat().st_size == b - a
+        except FileNotFoundError:
+            continue
+        if intact:
+            found.append((a, b, Path(entry.path)))
+        else:
+            Path(entry.path).unlink(missing_ok=True)
     return sorted(found)
 
 
@@ -277,7 +291,10 @@ def _read_slice(path: Path, a: int, b: int) -> bytes:
     first = int(_EXTENT.fullmatch(path.name).group(1))  # type: ignore[union-attr]
     with path.open("rb") as fh:
         fh.seek(a - first)
-        return fh.read(b - a)
+        data = fh.read(b - a)
+    if len(data) != b - a:  # checked on listing; guards against a file changed since
+        raise OSError(f"{path}: damaged cache extent")
+    return data
 
 
 def _read_size(folder: Path) -> int | None:
@@ -285,16 +302,3 @@ def _read_size(folder: Path) -> int | None:
         return int((folder / "size").read_text())
     except (FileNotFoundError, ValueError):
         return None
-
-
-def _write_atomic(path: Path, data: bytes) -> None:
-    """Write ``path`` via a temporary file and a rename (readers never see a partial file)."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".tmp-")
-    try:
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(data)
-        os.replace(tmp, path)
-    except BaseException:
-        Path(tmp).unlink(missing_ok=True)
-        raise

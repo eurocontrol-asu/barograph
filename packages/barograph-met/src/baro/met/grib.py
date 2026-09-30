@@ -28,7 +28,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from baro.met.store import ByteStore
+from baro.met.store import ByteStore, write_atomic
 
 __all__ = [
     "GribFormatError",
@@ -236,10 +236,7 @@ class GribIndex:
 
     def save(self, path: Path) -> None:
         """Write the index atomically to ``path``."""
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(self.to_json())
-        tmp.replace(path)
+        write_atomic(path, self.to_json().encode())
 
 
 def _walk(store: ByteStore, key: str, start: int, stop: int) -> list[GribMessage]:
