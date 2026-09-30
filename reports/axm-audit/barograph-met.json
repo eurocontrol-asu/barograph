@@ -18,7 +18,7 @@
     "PRACTICE_TEST_SCENARIO_NAMING: No anti-mirror naming violations",
     "PRACTICE_BARE_EXCEPT: 0 bare except(s) found",
     "PRACTICE_BLOCKING_IO: 0 blocking-IO violation(s) found",
-    "PRACTICE_DOCSTRING: Docstring coverage: 100% (150/150)",
+    "PRACTICE_DOCSTRING: Docstring coverage: 100% (149/149)",
     "PRACTICE_ENV_CREDENTIAL_READ: 0 credential environment read(s) found",
     {
       "rule_id": "PRACTICE_TOOL_SECRET_LOCATION",
@@ -65,7 +65,7 @@
     {
       "rule_id": "QUALITY_TESTS",
       "message": "Test coverage: 91% (1 test(s) failed)",
-      "text": "\u2022 cov 91% \u2192 100%\n\u2022 FAIL test_processes_share_the_cache_without_duplicate_downloads",
+      "text": "\u2022 cov 91% \u2192 100%\n\u2022 FAIL test_enrichment_recovers_the_analytic_forecast",
       "fix_hint": "Fix failing tests"
     }
   ]
