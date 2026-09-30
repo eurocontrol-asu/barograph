@@ -6,7 +6,7 @@ readme = "README.md"
 license = "EUPL-1.2"
 license-files = ["LICENSE"]
 requires-python = ">=3.12"
-authors = [{ name = "Gabriel Jarry", email = "jarry.gabriel@gmail.com" }]
+authors = [{ name = "Gabriel Jarry", email = "gabriel.jarry@eurocontrol.int" }]
 keywords = ["aviation", "ads-b", "era5", "arpege", "weather", "trajectory"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -51,8 +51,8 @@ fallback-version = "0.1.0.dev0"
 version-file = "src/baro/met/_version.py"
 
 [tool.hatch.build.targets.wheel]
-# PEP 420 namespace: `baro` has no __init__.py, so barograph-fill and
-# barograph-qar can ship baro.fill and baro.qar in their own wheels.
+# PEP 420 namespace: `baro` has no __init__.py, so later barograph packages can
+# ship their own `baro.*` modules in separate wheels.
 packages = ["src/baro"]
 
 [tool.hatch.build.targets.wheel.force-include]

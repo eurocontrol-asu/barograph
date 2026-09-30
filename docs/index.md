@@ -3,7 +3,7 @@
 </p>
 
 <h1 align="center">barograph</h1>
-<p align="center"><strong>Enrich aircraft trajectories: weather, gap filling, flight-data views.</strong></p>
+<p align="center"><strong>Enrich aircraft trajectories — starting with weather at full model resolution.</strong></p>
 
 barograph is a uv workspace of Python packages that attach meteorological
 information to aircraft trajectories (ADS-B, flight data). Its first package,
@@ -25,4 +25,11 @@ positions from ERA5 and Météo-France ARPEGE:
 |---|---|
 | [barograph-met](met/index.md) | Retrieval and interpolation of ERA5, ARPEGE and Open-Meteo archives at aircraft positions |
 
-Licensed under the [EUPL-1.2](https://eupl.eu/1.2/en/).
+!!! danger "Research use only"
+    This software is provided for research purposes and is not a regulatory
+    or operational tool; EUROCONTROL disclaims any responsibility for misuse or
+    operational application.
+
+Licensed under the [EUPL-1.2](https://eupl.eu/1.2/en/) — © 2026 Eurocontrol.
+The data read by barograph-met stay under their providers' licences; see
+[data sources and licences](met/index.md#data-sources-and-licences).

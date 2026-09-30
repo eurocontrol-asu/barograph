@@ -1,9 +1,9 @@
 site_name: barograph
-site_description: Enrich aircraft trajectories — weather at full model resolution, gap filling and flight-data views.
+site_description: Enrich aircraft trajectories — starting with weather at full model resolution (ERA5 model levels, ARPEGE).
 site_url: https://eurocontrol-asu.github.io/barograph/
 repo_url: https://github.com/eurocontrol-asu/barograph
 repo_name: eurocontrol-asu/barograph
-copyright: Copyright &copy; 2026 Gabriel Jarry — EUPL-1.2
+copyright: Copyright &copy; 2026 Eurocontrol — EUPL-1.2 — research use only
 
 theme:
   name: material
