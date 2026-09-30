@@ -68,6 +68,12 @@ proxy. Gains are reference ÷ barograph-met.
 | ERA5, 137 model levels | pycontrails 0.63.5 | 322 s → **31 s** (×10) | 4 736 → **349 MB** (×14) | 7.0 → **0.22 GB** | RMS 0.03 m/s (u, v), 0.016 K (T) |
 | ARPEGE 0.1°, official (14 days) | FastMeteo 1.2.0 | 67 s → **13 s** (×5) | 475 → **54 MB** (×9) | — | identical east of Greenwich; FastMeteo extrapolates west of it |
 
+> **Scope: one flight.** These figures compare a single trajectory. With many
+> flights on the same day, tools that download whole global fields (FastMeteo,
+> pycontrails) amortise them across flights, while barograph-met reads more
+> bands as flights spread out, so the gap narrows. A multi-flight benchmark
+> (1 to 1 000 flights on one day) is planned.
+
 Warm runs (second call, tool's own cache) take 0.2–2 s for every tool.
 ERA5 cases: one 2 h flight from the surface to FL350 (1 764 points, 4 hourly
 analyses). ARPEGE case: a 3 h flight across France (400 points). Network time

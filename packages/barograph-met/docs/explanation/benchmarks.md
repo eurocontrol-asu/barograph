@@ -16,3 +16,9 @@ ERA5 rows: one 2 h flight trajectory from the surface to FL350 (1 764 points,
 4 hourly analyses). ARPEGE rows: a 3 h synthetic flight across France (400
 points, run 2026-05-11 00 UTC). Network time dominates (> 98 % of the cold
 time); decoding and interpolation take well under a second.
+
+> **Scope: one flight.** These figures compare a single trajectory. With many
+> flights on the same day, tools that download whole global fields (FastMeteo,
+> pycontrails) amortise them across flights, while barograph-met reads more
+> bands as flights spread out, so the gap narrows. A multi-flight benchmark
+> (1 to 1 000 flights on one day) is planned.
