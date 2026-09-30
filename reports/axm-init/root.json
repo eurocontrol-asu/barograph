@@ -1,0 +1,36 @@
+{
+  "score": 91,
+  "grade": "A",
+  "context": "workspace",
+  "workspace_root": "/home/runner/work/barograph/barograph",
+  "excluded_checks": [],
+  "passed_count": 36,
+  "failures": [
+    {
+      "name": "changelog.gitcliff_config",
+      "message": "No [tool.git-cliff] config found",
+      "details": [
+        "git-cliff auto-generates CHANGELOG from conventional commits"
+      ],
+      "fix": "Add [tool.git-cliff.changelog] and [tool.git-cliff.git] to pyproject.toml."
+    },
+    {
+      "name": "pyproject.pyproject_dynamic_version",
+      "message": "Version is not dynamically managed",
+      "details": [
+        "Missing: dynamic = [\"version\"]",
+        "Missing: hatch-vcs in build-system.requires"
+      ],
+      "fix": "Add hatch-vcs to build-system.requires and set dynamic = [\"version\"]."
+    },
+    {
+      "name": "pyproject.pyproject_wheel_doc_shipping",
+      "message": "2 auto-detected docs/*.md file(s) not force-included",
+      "details": [
+        "docs/contributing.md",
+        "docs/index.md"
+      ],
+      "fix": "Either opt in by force-including the files:\n[tool.hatch.build.targets.wheel.force-include]\n\"docs/contributing.md\" = \"barograph_workspace/docs/contributing.md\"\n\"docs/index.md\" = \"barograph_workspace/docs/index.md\"\nor opt out by adding `[tool.axm-init.wheel-doc]` with `files = []`."
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "score": 100,
+  "grade": "A",
+  "context": "member",
+  "workspace_root": "/home/runner/work/barograph/barograph",
+  "excluded_checks": [],
+  "passed_count": 36,
+  "failures": []
+}
