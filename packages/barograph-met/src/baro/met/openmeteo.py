@@ -353,7 +353,7 @@ def gather_tiles(
     t_in: int,
 ) -> NDArray[np.float32]:
     """Values at archive ``rows x cols`` (output order) for one hour, from cached tiles."""
-    out = np.empty((len(rows), len(cols)), dtype=np.float32)
+    out = np.full((len(rows), len(cols)), np.nan, dtype=np.float32)
     for i, r in enumerate(rows):
         tr, lr = divmod(int(r), tp)
         for tc in np.unique(cols // tp):

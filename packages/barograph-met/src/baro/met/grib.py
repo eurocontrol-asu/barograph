@@ -30,7 +30,8 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 
-from baro.met.store import ByteStore, write_atomic
+from baro.met.common import Lru, write_atomic
+from baro.met.store import ByteStore
 
 __all__ = [
     "GribFormatError",
@@ -367,6 +368,9 @@ def fetch_messages(
     return list(executor.map(get, messages))
 
 
+_MAX_INDEXES = 256  # message indexes kept in memory (the rest are re-read from disk)
+
+
 class GribIndexStore:
     """Message indexes of the files of one store: memory, then ``directory``, else built.
 
@@ -378,7 +382,7 @@ class GribIndexStore:
     def __init__(self, store: ByteStore, directory: Path | None = None) -> None:
         self.store = store
         self.directory = directory
-        self._indexes: dict[str, GribIndex] = {}
+        self._indexes: Lru[str, GribIndex] = Lru(_MAX_INDEXES)
         self._building: dict[str, threading.Lock] = {}
         self._lock = threading.Lock()
 

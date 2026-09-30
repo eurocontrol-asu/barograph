@@ -30,6 +30,10 @@ enricher = Enricher(arco_model_levels(), cache_dir="/shared/era5-cache")
   fetched under file locks on the 1 MiB windows they cover, so threads and
   processes sharing the cache never download the same bytes twice, while
   disjoint reads stay parallel.
+- The cache only grows (nothing is ever evicted): size it for the campaign
+  (for 1 000 worldwide flights of one day, about 3.6 GB for ERA5 on 22
+  pressure levels and 15 GB on the 137 model levels) and delete the folder,
+  or part of it, when no longer needed; nothing else refers to it.
 - A fixed `domain=` still forces one box per time slice, and `mode="global"`
   reads whole fields on every level (FastMeteo-like cost).
 

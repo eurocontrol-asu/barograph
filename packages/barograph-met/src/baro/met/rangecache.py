@@ -36,7 +36,8 @@ from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from baro.met.store import ByteStore, TransferStats, write_atomic
+from baro.met.common import write_atomic
+from baro.met.store import ByteStore, TransferStats
 
 __all__ = ["CacheStats", "CachedStore", "RangeCache", "cover", "namespace_for"]
 
