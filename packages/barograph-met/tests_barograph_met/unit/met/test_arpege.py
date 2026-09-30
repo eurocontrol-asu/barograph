@@ -51,3 +51,16 @@ def test_unknown_variables_and_resolution_are_rejected() -> None:
 
 def test_coverage_is_unknown_without_a_listing() -> None:
     assert ArpegeSource(store=MemoryStore({}), listing_url=None).coverage() is None
+
+
+def test_a_file_not_yet_published_is_checked_again_later(monkeypatch: pytest.MonkeyPatch) -> None:
+    store = MemoryStore({})
+    src = ArpegeSource(store=store, listing_url=None)
+    key = src.file_key(RUN, 0)
+    assert not src._published(key)
+    store.objects[key] = b"GRIB"  # the run is published a bit later
+    assert not src._published(key)  # trusted for a while
+    monkeypatch.setattr("baro.met.arpege._RECHECK_S", 0.0)
+    assert src._published(key)
+    del store.objects[key]
+    assert src._published(key)  # a published file is never re-checked

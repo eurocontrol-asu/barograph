@@ -16,7 +16,6 @@ Ouverte / Etalab 2.0.
 
 from __future__ import annotations
 
-import hashlib
 import re
 import threading
 import time
@@ -31,7 +30,7 @@ import numpy as np
 
 from baro.met.base import CubeKey, DataUnavailableError
 from baro.met.domain import Cube, Domain, GridIndex
-from baro.met.grib import GribIndex, decode_message, fetch_messages
+from baro.met.grib import GribIndex, GribIndexStore, decode_message, fetch_messages
 from baro.met.rangecache import CachedStore, RangeCache, namespace_for
 from baro.met.store import ByteStore, FileStore, HttpStore, MissingChunkError, TransferStats
 from baro.met.tiling import Tiling
@@ -49,6 +48,7 @@ __all__ = ["ARPEGE_BASE_URL", "ARPEGE_LISTING_URL", "ARPEGE_PARAMS", "ArpegeSour
 ARPEGE_BASE_URL = "https://files.data.gouv.fr/meteofrance-pnt/pnt"
 # S3-style listing of the same files (the data.gouv.fr entry point only serves HTML)
 ARPEGE_LISTING_URL = "https://meteofrance-pnt.s3.rbx.io.cloud.ovh.net"
+_RECHECK_S = 300.0  # how long "file not published yet" is trusted
 _MAX_LEAD_H = 102
 _RUN_PREFIX = re.compile(r"(\d{4}-\d{2}-\d{2}T\d{2}):00:00Z")
 
@@ -137,14 +137,15 @@ class ArpegeSource:
         is_local = "://" not in base_url
         self.store = store or (FileStore(base_url) if is_local else HttpStore(base_url))
         self._messages: ByteStore = self.store  # message reads (through the cache, if any)
-        self.index_dir = None if index_dir is None else Path(index_dir).expanduser()
         self.source_id = f"arpege-{resolution}-{package}"
+        self.indexes = GribIndexStore(
+            self.store,
+            None if index_dir is None else Path(index_dir).expanduser() / self.source_id,
+        )
         self.listing_url = listing_url
         self._local_root = Path(base_url) if is_local else None
         self._coverage: tuple[float, tuple[np.datetime64, np.datetime64] | None] | None = None
-        self._indexes: dict[str, GribIndex] = {}
-        self._building: dict[str, threading.Lock] = {}
-        self._exists: dict[str, bool] = {}
+        self._exists: dict[str, tuple[bool, float]] = {}  # published?, checked at
         self._lock = threading.Lock()
 
     @property
@@ -161,8 +162,8 @@ class ArpegeSource:
         self._messages = CachedStore(
             self.store, cache, namespace_for(self.store.location), lambda _key: True
         )
-        if self.index_dir is None:
-            self.index_dir = cache.root / "grib-index"
+        if self.indexes.directory is None:
+            self.indexes.directory = cache.root / "grib-index" / self.source_id
 
     # -- coverage ------------------------------------------------------------------------------
     def published_runs(self) -> list[np.datetime64]:
@@ -220,16 +221,18 @@ class ArpegeSource:
         return f"{stamp}/arpege/{res}/{pkg}/{name}"
 
     def _published(self, key: str) -> bool:
+        """Whether ``key`` exists; a "not yet" is re-checked after a while (runs keep coming)."""
         with self._lock:
-            if key in self._exists:
-                return self._exists[key]
+            known = self._exists.get(key)
+        if known is not None and (known[0] or time.monotonic() - known[1] < _RECHECK_S):
+            return known[0]
         try:
             self.store.size(key)
             ok = True
         except MissingChunkError:
             ok = False
         with self._lock:
-            self._exists[key] = ok
+            self._exists[key] = (ok, time.monotonic())
         return ok
 
     def _candidate_runs(self, t0: np.datetime64) -> list[np.datetime64]:
@@ -265,50 +268,6 @@ class ArpegeSource:
         run = self.run_for(t0h)
         return CubeKey(t0h, run), CubeKey(t0h + self.time_step, run)
 
-    def index(self, key: str, executor: Executor | None = None) -> GribIndex:
-        """Message index of ``key``: memory, then the on-disk cache, else built and saved.
-
-        Built once per process even when several cubes of the same file are
-        fetched at the same time; a damaged or stale saved index is rebuilt.
-        """
-        with self._lock:
-            if key in self._indexes:
-                return self._indexes[key]
-            gate = self._building.setdefault(key, threading.Lock())
-        with gate:
-            with self._lock:
-                if key in self._indexes:
-                    return self._indexes[key]
-            idx = self._saved_index(key)
-            if idx is None:
-                idx = GribIndex.build(self.store, key, executor=executor)
-                if self.index_dir is not None:
-                    idx.save(self._index_path(key))
-            with self._lock:
-                self._indexes[key] = idx
-                self._building.pop(key, None)
-        return idx
-
-    def _index_path(self, key: str) -> Path:
-        assert self.index_dir is not None
-        digest = hashlib.sha256(key.encode()).hexdigest()[:24]
-        return self.index_dir / self.source_id / f"{digest}.json"
-
-    def _saved_index(self, key: str) -> GribIndex | None:
-        """The index saved for ``key``, if it is intact and still matches the file."""
-        if self.index_dir is None:
-            return None
-        path = self._index_path(key)
-        try:
-            idx = GribIndex.from_json(path.read_text())
-        except FileNotFoundError:
-            return None
-        except (ValueError, KeyError, TypeError):  # damaged (e.g. by a crash): rebuild
-            return None
-        if idx.key != key or idx.size != self.store.size(key):
-            return None  # stale or colliding entry
-        return idx
-
     # -- cubes ---------------------------------------------------------------------------------
     def fetch(
         self,
@@ -325,7 +284,7 @@ class ArpegeSource:
         lead_h = int((key.valid - key.run) / _HOUR)
         file = self.file_key(key.run, lead_h)
         try:
-            idx = self.index(file, executor)
+            idx = self.indexes.get(file, executor)
         except MissingChunkError as exc:
             raise DataUnavailableError(f"{self.source_id}: {file} not published") from exc
         vertical = self._vertical(idx, float(lead_h))

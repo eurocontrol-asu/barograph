@@ -16,9 +16,11 @@ Decoding needs ecCodes (``pip install 'barograph-met[grib]'``).
 
 from __future__ import annotations
 
+import hashlib
 import itertools
 import json
 import struct
+import threading
 from collections.abc import Sequence
 from concurrent.futures import Executor
 from dataclasses import asdict, dataclass
@@ -33,6 +35,7 @@ from baro.met.store import ByteStore, write_atomic
 __all__ = [
     "GribFormatError",
     "GribIndex",
+    "GribIndexStore",
     "GribMessage",
     "decode_message",
     "fetch_messages",
@@ -355,3 +358,57 @@ def fetch_messages(
     if executor is None or len(messages) <= 1:
         return [get(m) for m in messages]
     return list(executor.map(get, messages))
+
+
+class GribIndexStore:
+    """Message indexes of the files of one store: memory, then ``directory``, else built.
+
+    An index is built once per process even when several readers ask for it at
+    the same time; a saved index that is damaged, stale (the file size changed)
+    or for another key is rebuilt.
+    """
+
+    def __init__(self, store: ByteStore, directory: Path | None = None) -> None:
+        self.store = store
+        self.directory = directory
+        self._indexes: dict[str, GribIndex] = {}
+        self._building: dict[str, threading.Lock] = {}
+        self._lock = threading.Lock()
+
+    def get(self, key: str, executor: Executor | None = None) -> GribIndex:
+        """Index of ``key``."""
+        with self._lock:
+            if key in self._indexes:
+                return self._indexes[key]
+            gate = self._building.setdefault(key, threading.Lock())
+        with gate:
+            with self._lock:
+                if key in self._indexes:
+                    return self._indexes[key]
+            idx = self._saved(key)
+            if idx is None:
+                idx = GribIndex.build(self.store, key, executor=executor)
+                if self.directory is not None:
+                    idx.save(self._path(key))
+            with self._lock:
+                self._indexes[key] = idx
+                self._building.pop(key, None)
+        return idx
+
+    def _path(self, key: str) -> Path:
+        assert self.directory is not None
+        return self.directory / f"{hashlib.sha256(key.encode()).hexdigest()[:24]}.json"
+
+    def _saved(self, key: str) -> GribIndex | None:
+        """The index saved for ``key``, if it is intact and still matches the file."""
+        if self.directory is None:
+            return None
+        try:
+            idx = GribIndex.from_json(self._path(key).read_text())
+        except FileNotFoundError:
+            return None
+        except (ValueError, KeyError, TypeError):  # damaged (e.g. by a crash): rebuild
+            return None
+        if idx.key != key or idx.size != self.store.size(key):
+            return None  # stale or colliding entry
+        return idx
