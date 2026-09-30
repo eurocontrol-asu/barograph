@@ -81,6 +81,27 @@ class Domain:
         return start + (other.lon_max - other.lon_min) <= self.lon_max
 
 
+def _regional_start(domain: Domain, lon0: float, dlon: float, nlon: int) -> float:
+    """Start of ``domain`` in the frame of a regional grid ``[lon0, lon0 + (nlon - 1) dlon]``.
+
+    A longitude box can be written with its start shifted by any multiple of
+    360 degrees; the framing kept is the one covering most of the grid, so a
+    box straddling the western edge of the grid is clipped, not sent a full
+    turn east of it.
+    """
+    width = domain.lon_max - domain.lon_min
+    if width >= FULL_TURN:  # every longitude: the whole grid
+        return lon0
+    last = lon0 + (nlon - 1) * dlon
+    base = lon0 + (domain.lon_min - lon0) % FULL_TURN  # in [lon0, lon0 + 360)
+
+    def overlap(start: float) -> float:
+        """Length of grid covered by the box starting at ``start``."""
+        return min(start + width, last) - max(start, lon0)
+
+    return max((base, base - FULL_TURN), key=overlap)
+
+
 @dataclass(frozen=True)
 class GridIndex:
     """Where a domain sits in a regular grid (latitude descending, longitude ascending).
@@ -111,9 +132,9 @@ class GridIndex:
         i0 = min(i0, i1 - 1)
         periodic = abs(nlon * dlon - FULL_TURN) < _PERIODIC_TOLERANCE
         lon0 = float(grid_lon[0])
-        # periodic: keep the caller's framing (columns wrap); regional: express the
-        # domain start in the grid frame [lon0, lon0 + 360)
-        start = domain.lon_min if periodic else lon0 + (domain.lon_min - lon0) % 360.0
+        # periodic: keep the caller's framing (columns wrap); regional: the framing
+        # of the domain that overlaps the grid most
+        start = domain.lon_min if periodic else _regional_start(domain, lon0, dlon, nlon)
         stop = start + (domain.lon_max - domain.lon_min)
         j0 = int(np.floor((start - lon0) / dlon + 1e-9))
         j1 = int(np.ceil((stop - lon0) / dlon - 1e-9))

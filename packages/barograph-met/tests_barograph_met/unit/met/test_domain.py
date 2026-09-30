@@ -80,3 +80,25 @@ def test_enclosing_domains() -> None:
     assert outer.encloses(Domain(41.0, 49.0, -5.0, 5.0))
     assert not outer.encloses(Domain(41.0, 49.0, 5.0, 15.0))
     assert Domain.whole_globe().encloses(Domain(-10.0, 10.0, 100.0, 200.0))
+
+
+# ARPEGE 0.1 deg Europe as the GRIB decoder returns it: 328 (-32) .. 402 (42) degrees east
+ARPEGE_LAT = np.arange(72.0, 19.95, -0.1)
+ARPEGE_LON = np.arange(328.0, 402.05, 0.1)
+
+
+def test_regional_box_across_the_western_edge_is_clipped_not_sent_east() -> None:
+    grid = GridIndex.locate(Domain(40, 50, -32.1, 10.0), ARPEGE_LAT, ARPEGE_LON)
+    assert grid.lon[0] == pytest.approx(328.0) and grid.lon[-1] == pytest.approx(370.0)
+
+
+def test_whole_globe_on_a_regional_grid_is_the_whole_grid() -> None:
+    grid = GridIndex.locate(Domain.whole_globe(), ARPEGE_LAT, ARPEGE_LON)
+    assert grid.lon[0] == pytest.approx(328.0) and grid.lon[-1] == pytest.approx(402.0)
+    wide = GridIndex.locate(Domain(40, 50, -60.0, 60.0), ARPEGE_LAT, ARPEGE_LON)
+    assert len(wide.lon) == len(ARPEGE_LON)
+
+
+def test_regional_box_inside_the_grid_is_unchanged() -> None:
+    grid = GridIndex.locate(Domain(40, 50, -5.0, 10.0), ARPEGE_LAT, ARPEGE_LON)
+    assert grid.lon[0] == pytest.approx(355.0) and grid.lon[-1] == pytest.approx(370.0)
