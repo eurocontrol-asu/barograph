@@ -39,7 +39,7 @@ from baro.met.kernel import (
     sample,
 )
 from baro.met.rangecache import RangeCache
-from baro.met.tiling import Tiling, partition
+from baro.met.tiling import partition
 
 __all__ = ["EnrichResult", "Enricher", "UncoveredPointsWarning"]
 
@@ -75,7 +75,7 @@ class _CubeRequest:
     key: CubeKey
     domain: Domain
     p_range: tuple[float, float]
-    token: str  # claim token: identical requests of other processes share it
+    token: str  # claim token: one per time slice (all its groups share bytes at their edges)
 
 
 @dataclass(frozen=True)
@@ -354,7 +354,7 @@ class Enricher:
             for label in range(int(labels.max()) + 1 if sel.size else 0):
                 part = sel[labels == label]
                 ids[labels == label] = len(requests)
-                requests.append(self._request(key, tiling, lat[part], lon[part], p[part]))
+                requests.append(self._request(key, lat[part], lon[part], p[part]))
             lookup[key] = (sel, ids)
         intervals = []
         for start, members in groups.items():
@@ -369,7 +369,6 @@ class Enricher:
     def _request(
         self,
         key: CubeKey,
-        tiling: Tiling | None,
         lat: NDArray[np.float64],
         lon: NDArray[np.float64],
         p: NDArray[np.float64],
@@ -377,12 +376,7 @@ class Enricher:
         """Request for the cube ``key`` over the region and pressures of some points."""
         domain = self.domain or Domain.from_points(lat, lon, self.margin_deg)
         src = key.source or self.source.source_id
-        return _CubeRequest(
-            key,
-            domain,
-            (float(p.min()), float(p.max())),
-            f"{src}|{key.valid}|{key.run}|{_tile_signature(domain, tiling)}",
-        )
+        return _CubeRequest(key, domain, (float(p.min()), float(p.max())), f"{src}|{key}")
 
     def _stream(
         self,
@@ -408,7 +402,9 @@ class Enricher:
     ) -> Cube | None:
         if self.cache is None:
             return self._download(req, io, counters)
-        with self.cache.claim(req.token):  # others wait, then read the bytes from disk
+        # one claim per time slice, across threads and processes: whoever comes second
+        # (another group of the same hour, another process) reads the bytes from disk
+        with self.cache.claim(req.token):
             return self._download(req, io, counters)
 
     def _download(
@@ -488,20 +484,3 @@ def _pairs(iv: _Interval) -> Iterator[tuple[NDArray[np.int64], int, int]]:
     unique, inverse = np.unique(pairs, axis=0, return_inverse=True)
     for i, (r0, r1) in enumerate(unique.tolist()):
         yield iv.points[inverse.reshape(-1) == i], int(r0), int(r1)
-
-
-def _tile_signature(domain: Domain, tiling: Tiling | None) -> str:
-    """The tiles a request covers, identical for identical requests of other processes."""
-    if tiling is None:
-        return "all"
-    rows = (
-        int(np.floor((domain.lat_min - tiling.lat0) / tiling.lat_step)),
-        int(np.floor((domain.lat_max - tiling.lat0) / tiling.lat_step)),
-    )
-    if tiling.lon_step is None:
-        return f"rows{rows}"
-    cols = (
-        int(np.floor((domain.lon_min - tiling.lon0) / tiling.lon_step)),
-        int(np.floor((domain.lon_max - tiling.lon0) / tiling.lon_step)),
-    )
-    return f"rows{rows}cols{cols}"

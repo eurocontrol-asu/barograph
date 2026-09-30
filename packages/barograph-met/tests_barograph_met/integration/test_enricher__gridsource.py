@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from baro.met import Enricher, Flag, GridSource, model_levels
+from baro.met import Enricher, Flag, GridSource, Tiling, model_levels
 from baro.met.sources import SurfacePressure
 from baro.met.store import FileStore, ZarrStore
 from synthetic import EPOCH, truth, write_stores
@@ -110,3 +110,32 @@ def test_concurrent_enrichers_download_each_byte_once(
     # the time-axis check and the 4 KiB header probe that sizes the tiling
     overhead = (stores[0] / "time" / "0").stat().st_size + 4096
     assert reference <= sum(s["bytes"] for s in stats) <= reference + 4 * overhead
+
+
+def test_groups_of_one_hour_sharing_blocks_are_downloaded_once(
+    stores: tuple[Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two distant groups of the same hours read the same Blosc blocks at their edges."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    monkeypatch.setattr(GridSource, "tiling", lambda _self, _key: Tiling(-90.0, 2.0))
+    n = 100
+    one = EPOCH + (np.linspace(10, 110, n) * 60).astype("timedelta64[s]")
+    time = np.concatenate([one, one])  # both groups fly at the same hours
+    lat = np.concatenate([np.full(n, 42.2), np.full(n, 47.8)])  # empty bands in between
+    lon = np.concatenate([np.linspace(21.0, 27.0, n), np.linspace(27.0, 33.0, n)])
+    pressure = np.full(2 * n, 25000.0)
+
+    def run(cache: Path) -> dict[str, int]:
+        res = Enricher(_source(stores), cache_dir=cache).enrich(
+            time, lat, lon, pressure_pa=pressure
+        )
+        assert np.all(res.flags == Flag.OK)
+        return res.stats
+
+    alone = run(tmp_path / "alone")
+    assert alone["cubes"] == 2 * 3  # two groups per hour
+    with ThreadPoolExecutor(4) as ex:
+        stats = list(ex.map(run, [tmp_path / "shared"] * 4))
+    overhead = (stores[0] / "time" / "0").stat().st_size + 4096  # reads made before any claim
+    assert alone["bytes"] <= sum(s["bytes"] for s in stats) <= alone["bytes"] + 4 * overhead
