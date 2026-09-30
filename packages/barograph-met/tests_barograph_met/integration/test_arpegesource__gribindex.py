@@ -111,3 +111,25 @@ def test_a_flight_entering_across_the_western_edge_keeps_every_point(mirror: Pat
     for mode in ("flight", "global"):
         res = Enricher(src, mode=mode).enrich(time, lat, lon, pressure_pa=np.full(n, 30000.0))
         assert np.all(res.flags == Flag.OK), mode
+
+
+def test_index_is_built_once_and_a_damaged_one_is_rebuilt(
+    mirror: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    builds: list[str] = []
+    build = GribIndex.build
+
+    def counting(store, key, **kw):  # type: ignore[no-untyped-def]
+        builds.append(key)
+        return build(store, key, **kw)
+
+    monkeypatch.setattr(GribIndex, "build", staticmethod(counting))
+    src = ArpegeSource(resolution="01", base_url=str(mirror), index_dir=tmp_path)
+    with ThreadPoolExecutor(8) as ex:
+        list(ex.map(lambda _: src.index(_file(mirror)), range(8)))
+    assert builds == [_file(mirror)]
+    (saved,) = tmp_path.rglob("*.json")
+    saved.write_text('{"key": "tru')  # truncated by a crash
+    again = ArpegeSource(resolution="01", base_url=str(mirror), index_dir=tmp_path)
+    assert len(again.index(_file(mirror)).messages) == 3 * 5 * 13
+    assert len(builds) == 2
