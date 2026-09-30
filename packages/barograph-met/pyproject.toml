@@ -32,10 +32,10 @@ pandas = ["pandas>=2.0"]
 openmeteo = ["omfiles>=1.2"]
 
 [project.urls]
-Homepage = "https://github.com/asu-eurocontrol/barograph"
-Documentation = "https://asu-eurocontrol.github.io/barograph/met/"
-Repository = "https://github.com/asu-eurocontrol/barograph.git"
-Issues = "https://github.com/asu-eurocontrol/barograph/issues"
+Homepage = "https://github.com/eurocontrol-asu/barograph"
+Documentation = "https://eurocontrol-asu.github.io/barograph/met/"
+Repository = "https://github.com/eurocontrol-asu/barograph.git"
+Issues = "https://github.com/eurocontrol-asu/barograph/issues"
 
 [build-system]
 requires = ["hatchling", "hatch-vcs"]

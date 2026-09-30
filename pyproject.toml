@@ -17,9 +17,9 @@ classifiers = [
 dependencies = ["barograph-met[grib,pandas,openmeteo]"]
 
 [project.urls]
-Homepage = "https://asu-eurocontrol.github.io/barograph/"
-Repository = "https://github.com/asu-eurocontrol/barograph"
-Documentation = "https://asu-eurocontrol.github.io/barograph/"
+Homepage = "https://eurocontrol-asu.github.io/barograph/"
+Repository = "https://github.com/eurocontrol-asu/barograph"
+Documentation = "https://eurocontrol-asu.github.io/barograph/"
 
 [dependency-groups]
 dev = [

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/asu-eurocontrol/barograph/main/assets/logo.svg" alt="barograph" width="100" />
+  <img src="https://raw.githubusercontent.com/eurocontrol-asu/barograph/main/assets/logo.svg" alt="barograph" width="100" />
 </p>
 
 <p align="center">
@@ -7,10 +7,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/asu-eurocontrol/barograph/actions/workflows/ci.yml"><img src="https://github.com/asu-eurocontrol/barograph/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/asu-eurocontrol/barograph/actions/workflows/axm-quality.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/asu-eurocontrol/barograph/gh-pages/badges/barograph-met/axm-audit.json" alt="axm-audit"></a>
-  <a href="https://github.com/asu-eurocontrol/barograph/actions/workflows/axm-quality.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/asu-eurocontrol/barograph/gh-pages/badges/barograph-met/axm-init.json" alt="axm-init"></a>
-  <a href="https://github.com/asu-eurocontrol/barograph/actions/workflows/axm-quality.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/asu-eurocontrol/barograph/gh-pages/badges/barograph-met/coverage.json" alt="Coverage"></a>
+  <a href="https://github.com/eurocontrol-asu/barograph/actions/workflows/ci.yml"><img src="https://github.com/eurocontrol-asu/barograph/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/eurocontrol-asu/barograph/actions/workflows/axm-quality.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/eurocontrol-asu/barograph/gh-pages/badges/barograph-met/axm-audit.json" alt="axm-audit"></a>
+  <a href="https://github.com/eurocontrol-asu/barograph/actions/workflows/axm-quality.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/eurocontrol-asu/barograph/gh-pages/badges/barograph-met/axm-init.json" alt="axm-init"></a>
+  <a href="https://github.com/eurocontrol-asu/barograph/actions/workflows/axm-quality.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/eurocontrol-asu/barograph/gh-pages/badges/barograph-met/coverage.json" alt="Coverage"></a>
   <img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python 3.12+">
   <img src="https://img.shields.io/badge/license-EUPL--1.2-blue" alt="EUPL-1.2">
 </p>
@@ -70,7 +70,7 @@ Same points for every tool, cold cache, through a corporate HTTPS proxy.
 | ARPEGE 0.1° — FastMeteo 1.2.0 | 67 s | 475 MB | — | reference |
 | ARPEGE 0.1° — barograph-met | **13 s** | **54 MB** | — | identical east of Greenwich; FastMeteo extrapolates west of it |
 
-Details in the [documentation](https://asu-eurocontrol.github.io/barograph/met/explanation/benchmarks/).
+Details in the [documentation](https://eurocontrol-asu.github.io/barograph/met/explanation/benchmarks/).
 
 ## FastMeteo
 

@@ -1,8 +1,8 @@
 site_name: barograph
 site_description: Weather along aircraft trajectories — fast ERA5 and ARPEGE retrieval at aircraft positions.
-site_url: https://asu-eurocontrol.github.io/barograph/
-repo_url: https://github.com/asu-eurocontrol/barograph
-repo_name: asu-eurocontrol/barograph
+site_url: https://eurocontrol-asu.github.io/barograph/
+repo_url: https://github.com/eurocontrol-asu/barograph
+repo_name: eurocontrol-asu/barograph
 copyright: Copyright &copy; 2026 Gabriel Jarry — EUPL-1.2
 
 theme:

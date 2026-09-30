@@ -6,7 +6,7 @@ package directory is given. Python 3.12+, uv and Git are required.
 ## Development setup
 
 ```bash
-git clone https://github.com/asu-eurocontrol/barograph.git
+git clone https://github.com/eurocontrol-asu/barograph.git
 cd barograph
 uv sync --all-packages --all-groups
 uv run prek install --hook-type pre-commit --hook-type commit-msg --hook-type pre-push
