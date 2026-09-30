@@ -2,7 +2,8 @@
 
 Météo-France publishes ARPEGE as open data for about **14 days**; older runs
 are available from **Open-Meteo's archive** (stitched from the most recent run
-at each hour, values quantised, e.g. 0.5 K for temperature).
+at each hour, values stored as scaled integers: we measured 0.035 m/s and
+0.08 K RMS against the official files).
 
 ## Live open data
 

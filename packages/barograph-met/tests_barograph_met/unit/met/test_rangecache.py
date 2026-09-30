@@ -9,14 +9,14 @@ from baro.met.rangecache import CacheStats, cover, namespace_for
 A, B = Path("/c/0-100.bin"), Path("/c/150-300.bin")
 
 
-def testcover_splits_a_request_into_cached_pieces_and_gaps() -> None:
+def test_cover_splits_a_request_into_cached_pieces_and_gaps() -> None:
     extents = [(0, 100, A), (150, 300, B)]
     assert cover(extents, 50, 200) == [(50, 100, A), (100, 150, None), (150, 200, B)]
     assert cover(extents, 300, 320) == [(300, 320, None)]
     assert cover([], 10, 20) == [(10, 20, None)]
 
 
-def testcover_prefers_the_extent_reaching_furthest() -> None:
+def test_cover_prefers_the_extent_reaching_furthest() -> None:
     long = Path("/c/0-500.bin")
     assert cover([(0, 100, A), (0, 500, long)], 10, 400) == [(10, 400, long)]
 

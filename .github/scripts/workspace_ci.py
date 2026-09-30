@@ -55,11 +55,10 @@ def discover(root: Path) -> list[dict[str, object]]:
         for test_path in tests:
             if Path(test_path).is_absolute() or ".." in Path(test_path).parts:
                 raise ValueError(f"Test path must stay inside {name}: {test_path}")
-        # A member states for itself whether the Linux CI can run its tests.
-        # axm-mlx and axm-train need Apple Silicon: over there their conftests
-        # skip every module and the job then fails the coverage gate at 0%, so
-        # running them proves nothing. Declared per package rather than in a
-        # central list, because the reason belongs with the package that has it.
+        # A member states for itself whether the Linux CI can run its tests
+        # ([tool.axm-ci] skip = true, e.g. for hardware-specific packages whose
+        # tests would all be skipped here). Declared per package rather than in
+        # a central list, because the reason belongs with the package that has it.
         ci_skip = data.get("tool", {}).get("axm-ci", {}).get("skip", False)
         if not isinstance(ci_skip, bool):
             raise TypeError(f"[tool.axm-ci].skip must be a boolean in {name}")

@@ -44,6 +44,7 @@ from baro.met.tiling import partition
 __all__ = ["EnrichResult", "Enricher", "UncoveredPointsWarning"]
 
 _EPOCH = np.datetime64("1970-01-01T00", "ns")
+_PACKAGE_DIR = str(Path(__file__).parent)  # warnings point at the caller's code
 _ALL_LEVELS = 1_000_000
 
 type Mode = Literal["flight", "global"]
@@ -151,7 +152,8 @@ class Enricher:
     cache_dir:
         Optional on-disk cache of every byte read (immutable data only), shared
         between runs, calls and processes: a later call downloads only what no
-        earlier call has read.
+        earlier call has read. It is attached to ``source`` (which then keeps
+        using it, also through other enrichers).
     mode:
         ``"flight"`` (default) reads only the region and levels the points
         need. ``"global"`` reads whole fields on every level (FastMeteo-like),
@@ -322,7 +324,7 @@ class Enricher:
         )
         if self.on_uncovered == "raise":
             raise DataUnavailableError(message)
-        warnings.warn(message, UncoveredPointsWarning, stacklevel=4)
+        warnings.warn(message, UncoveredPointsWarning, skip_file_prefixes=(_PACKAGE_DIR,))
         return uncovered
 
     def _plan(

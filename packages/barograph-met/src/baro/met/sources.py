@@ -248,9 +248,6 @@ class GridSource:
             vertical=self.vertical.subset(positions),
             fields=fields,
             ps=ps,
-            p_range=(float(p_range[0]), float(p_range[1])),
-            level_margin=level_margin,
-            request_domain=domain,
         )
 
 

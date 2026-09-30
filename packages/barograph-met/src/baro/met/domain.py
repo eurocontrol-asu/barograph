@@ -2,17 +2,11 @@
 
 from __future__ import annotations
 
-import json
-import os
-import tempfile
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from baro.met.base import CubeKey
 from baro.met.vertical import VerticalCoordinate
 
 __all__ = ["FULL_TURN", "Cube", "Domain", "GridIndex"]
@@ -70,15 +64,6 @@ class Domain:
     def whole_globe(cls) -> Domain:
         """The domain covering the entire globe."""
         return cls(-90.0, 90.0, 0.0, 360.0)
-
-    def encloses(self, other: Domain) -> bool:
-        """True if ``other`` lies inside this box (longitudes compared modulo 360)."""
-        if not (self.lat_min <= other.lat_min and other.lat_max <= self.lat_max):
-            return False
-        if self.lon_max - self.lon_min >= FULL_TURN:
-            return True
-        start = self.lon_min + (other.lon_min - self.lon_min) % 360.0
-        return start + (other.lon_max - other.lon_min) <= self.lon_max
 
 
 def _regional_start(domain: Domain, lon0: float, dlon: float, nlon: int) -> float:
@@ -164,16 +149,7 @@ class Cube:
     vertical: VerticalCoordinate
     fields: dict[str, NDArray[np.float32]]  # (level, lat, lon)
     ps: NDArray[np.float32] | None = None  # surface pressure (Pa), (lat, lon)
-    # request the levels were selected for: pressures (Pa) and spare levels per side
-    p_range: tuple[float, float] = (0.0, float("inf"))
-    level_margin: int = 0
     run: np.datetime64 | None = None  # forecast base time (None for analyses)
-    request_domain: Domain | None = None  # domain asked for (may exceed a regional grid)
-
-    @property
-    def key(self) -> CubeKey:
-        """Cache key (validity time and run) of this cube."""
-        return CubeKey(np.datetime64(self.hour, "h"), self.run)
 
     def __post_init__(self) -> None:
         shape = (len(self.vertical), len(self.lat), len(self.lon))
@@ -190,109 +166,3 @@ class Cube:
         """Memory held by the fields and surface pressure."""
         total = sum(a.nbytes for a in self.fields.values())
         return total + (0 if self.ps is None else self.ps.nbytes)
-
-    def contains(self, domain: Domain) -> bool:
-        """True if the cube grid encloses ``domain``."""
-        lat_ok = self.lat[-1] <= domain.lat_min and domain.lat_max <= self.lat[0]
-        lon0 = float(self.lon[0])
-        start = lon0 + (domain.lon_min - lon0) % 360.0
-        return bool(lat_ok and start + (domain.lon_max - domain.lon_min) <= self.lon[-1])
-
-    def surface_pressure_range(self) -> tuple[float, float] | None:
-        """Minimum and maximum surface pressure (Pa), if known."""
-        if self.ps is None or not np.isfinite(self.ps).any():
-            return None
-        return float(np.nanmin(self.ps)), float(np.nanmax(self.ps))
-
-    # -- persistence -----------------------------------------------------------------------
-    def manifest(self) -> dict[str, Any]:
-        """JSON description written next to the cached arrays."""
-        return {
-            "source": self.source,
-            "hour": str(self.hour),
-            "lat": [float(self.lat[0]), float(self.lat[-1]), len(self.lat)],
-            "lon": [float(self.lon[0]), float(self.lon[-1]), len(self.lon)],
-            "vertical": self.vertical.kind,
-            "levels": [int(i) for i in self.vertical.ids],
-            "fields": sorted(self.fields),
-            "has_ps": self.ps is not None,
-            "p_range": list(self.p_range),
-            "level_margin": self.level_margin,
-            "run": None if self.run is None else str(self.run),
-            "domain": None if self.request_domain is None else self.request_domain.to_json(),
-        }
-
-    def save(self, path: Path) -> None:
-        """Atomically write ``path`` (.npz) then its ``.json`` manifest (commit marker)."""
-        path.parent.mkdir(parents=True, exist_ok=True)
-        arrays: dict[str, NDArray[Any]] = {f"field_{k}": v for k, v in self.fields.items()}
-        arrays |= {
-            "lat": self.lat,
-            "lon": self.lon,
-            "level_ids": self.vertical.ids,
-            "level_a": self.vertical.a,
-            "level_b": self.vertical.b,
-        }
-        if self.ps is not None:
-            arrays["ps"] = self.ps
-        _atomic_write(path, lambda fh: np.savez(fh, **arrays))  # type: ignore[arg-type]
-        text = json.dumps(self.manifest(), indent=1).encode()
-        _atomic_write(path.with_suffix(".json"), lambda fh: fh.write(text))
-
-    @classmethod
-    def load(cls, path: Path) -> Cube:
-        """Read a cube written by :meth:`save`."""
-        manifest = json.loads(path.with_suffix(".json").read_text())
-        with np.load(path) as z:
-            fields = {k.removeprefix("field_"): z[k] for k in z.files if k.startswith("field_")}
-            vertical = VerticalCoordinate(
-                manifest["vertical"], z["level_ids"], z["level_a"], z["level_b"]
-            )
-            ps = z["ps"] if "ps" in z.files else None
-            return cls(
-                source=manifest["source"],
-                hour=np.datetime64(manifest["hour"], "h"),
-                lat=z["lat"],
-                lon=z["lon"],
-                vertical=vertical,
-                fields=fields,
-                ps=ps,
-                p_range=(float(manifest["p_range"][0]), float(manifest["p_range"][1])),
-                level_margin=int(manifest["level_margin"]),
-                run=None if manifest.get("run") is None else np.datetime64(manifest["run"], "h"),
-                request_domain=None
-                if manifest.get("domain") is None
-                else Domain(**manifest["domain"]),
-            )
-
-    def serves(self, domain: Domain, p_range: tuple[float, float], level_margin: int) -> bool:
-        """True if this cube answers a request for ``domain`` and ``p_range``.
-
-        Levels are selected deterministically from the request pressure range
-        and the cube's surface-pressure range, which can only shrink on a
-        sub-domain: a wider original request therefore implies enough levels.
-        """
-        region_ok = (
-            self.request_domain.encloses(domain)
-            if self.request_domain is not None
-            else self.contains(domain)
-        )
-        return (
-            region_ok
-            and self.p_range[0] <= p_range[0]
-            and p_range[1] <= self.p_range[1]
-            and self.level_margin >= level_margin
-        )
-
-
-def _atomic_write(path: Path, write: Any) -> None:
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "wb") as fh:
-            write(fh)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp, path)
-    except BaseException:
-        Path(tmp).unlink(missing_ok=True)
-        raise
