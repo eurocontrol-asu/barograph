@@ -1,5 +1,46 @@
 # Benchmarks
 
+## Summary
+
+Two samples of 1 000 real flights drawn from OpenSky across all ICAO regions
+(one point every 10 s, surface to FL410): 18 June 2025 for ERA5, 28 September
+2026 for ARPEGE (Météo-France keeps its files 14 days). Flights are added to
+each tool's own cache in steps of 1, 10, 100 and 1 000; costs are cumulative
+from a cold cache, through a corporate HTTPS proxy; values are compared on
+every point both tools serve.
+
+| Case | Tool | 1 flight: time · download | 1 000 flights: time · download | Disk | Peak RAM | Values vs reference (1 000 flights) |
+|---|---|---:|---:|---:|---:|---|
+| ERA5, 22 pressure levels | FastMeteo 1.2.0 | 330 s · 3.6 GB | 744 s · 8.1 GB | 4.9 GB | 5.8 GB | reference |
+| | **barograph-met** | **15 s · 0.09 GB** | **302 s · 3.6 GB** | **3.6 GB** | **1.5 GB** | identical: 99th pct \|Δ\| < 2e-8 on 548 098 points ¹ |
+| ERA5, model levels | pycontrails 0.63.5 | 753 s · 13 GB | 1 893 s · 29.6 GB | 23.7 GB | 39 GB | reference |
+| | **barograph-met** (L137) | **34 s · 0.27 GB** | **900 s · 14.6 GB** | **14.6 GB** | **3.8 GB** | RMS 0.037 m/s (u, v), 0.021 K (T); 99th pct 0.15 m/s, 0.08 K on 545 466 points ² |
+| ARPEGE 0.25°, official | FastMeteo ³ | 236 s · 2.6 GB | 504 s · 2.6 GB | 2.6 GB | 13 GB | reference |
+| | **barograph-met** | **95 s · 0.20 GB** | **211 s · 1.25 GB** | **1.2 GB** | **2.1 GB** | identical with the same 22 levels: \|Δ\| ≤ 3e-8 on 574 673 points ⁴ |
+
+At 1 000 flights barograph-met is 2.1–2.5× faster, downloads 2–2.3× less and
+needs 4–10× less memory; for a single flight it downloads 13–48× less and is
+2.5–22× faster (ARPEGE: indexing the files dominates the first call). FastMeteo and
+pycontrails download whole global fields for every hour they need, so their
+cost reaches a full day as soon as the flights cover it; barograph-met reads
+only the latitude bands, levels and messages the flights cross, so its cost
+grows with the area covered and levels off. Points it cannot interpolate
+(below the lowest level, invalid altitudes: 0.4–0.8 %) are flagged, never
+extrapolated.
+
+1. Including the points where FastMeteo 1.2.0 extrapolates across the
+   Greenwich seam, RMS 0.006 m/s and 0.002 K.
+2. Different vertical methods: pycontrails interpolates model levels to
+   pressure levels at a reference surface pressure, barograph-met interpolates
+   the model levels directly with each column's actual surface pressure.
+3. FastMeteo 1.2.0 cannot reach Météo-France's new data.gouv.fr host; it runs
+   from the branch of [fastmeteo#5](https://github.com/open-aviation/fastmeteo/pull/5),
+   in its only full-day mode (00 UTC run, one 000H024H file).
+4. By default barograph-met also uses the 275 and 925 hPa levels that
+   FastMeteo drops: 0.23 m/s and 0.12 K RMS from FastMeteo's values.
+
+The sections below give the single-flight measurements and every step.
+
 ## One flight
 
 Same points for every tool, cold cache (first run), through a corporate HTTPS
