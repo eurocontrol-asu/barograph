@@ -2,7 +2,7 @@
 name = "barograph-workspace"
 version = "0.0.0"
 requires-python = ">=3.12"
-description = "barograph workspace — weather along aircraft trajectories"
+description = "barograph workspace — enrich aircraft trajectories: weather, gap filling, flight-data views"
 license = "EUPL-1.2"
 license-files = ["LICENSE"]
 readme = "README.md"

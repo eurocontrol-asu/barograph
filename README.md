@@ -3,7 +3,7 @@
 </p>
 
 <h1 align="center">barograph</h1>
-<p align="center"><strong>Weather along aircraft trajectories.</strong></p>
+<p align="center"><strong>Enrich aircraft trajectories: weather, gap filling, flight-data views.</strong></p>
 
 <p align="center">
   <a href="https://github.com/eurocontrol-asu/barograph/actions/workflows/ci.yml"><img src="https://github.com/eurocontrol-asu/barograph/actions/workflows/ci.yml/badge.svg" alt="CI"></a>

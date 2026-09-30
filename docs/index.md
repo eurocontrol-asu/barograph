@@ -3,7 +3,7 @@
 </p>
 
 <h1 align="center">barograph</h1>
-<p align="center"><strong>Weather along aircraft trajectories.</strong></p>
+<p align="center"><strong>Enrich aircraft trajectories: weather, gap filling, flight-data views.</strong></p>
 
 barograph is a uv workspace of Python packages that attach meteorological
 information to aircraft trajectories (ADS-B, flight data). Its first package,

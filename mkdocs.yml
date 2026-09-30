@@ -1,5 +1,5 @@
 site_name: barograph
-site_description: Weather along aircraft trajectories — fast ERA5 and ARPEGE retrieval at aircraft positions.
+site_description: Enrich aircraft trajectories — weather at full model resolution, gap filling and flight-data views.
 site_url: https://eurocontrol-asu.github.io/barograph/
 repo_url: https://github.com/eurocontrol-asu/barograph
 repo_name: eurocontrol-asu/barograph
