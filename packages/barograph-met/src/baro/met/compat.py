@@ -7,7 +7,8 @@ library's engine. Deliberate differences, all documented:
 
 * points that cannot be interpolated get NaN instead of an extrapolated value;
   the reason is available in ``last_result.flags`` (or ``flags_column``);
-* ``local_store`` is an immutable regional cube cache, not a global zarr copy;
+* ``local_store`` is a cache of the byte ranges read (immutable data only), not a
+  global zarr copy;
   ``mode="global"`` reads whole fields (FastMeteo-like cost, reusable cache);
 * model levels use all 137 levels with the actual surface pressure;
 * ARPEGE lead-time files are resolved automatically (``time_range`` is ignored).
@@ -116,7 +117,7 @@ class ArcoEra5(_FrameEnricher):
 
 
 class Arpege(_FrameEnricher):
-    """Météo-France ARPEGE forecasts (0.25 deg global 3-hourly, or 0.1 deg Europe hourly)."""
+    """Météo-France ARPEGE forecasts (0.25 deg global or 0.1 deg Europe; hourly to 48 h)."""
 
     def __init__(  # noqa: PLR0913, PLR0917 - same signature as fastmeteo.source.Arpege
         self,

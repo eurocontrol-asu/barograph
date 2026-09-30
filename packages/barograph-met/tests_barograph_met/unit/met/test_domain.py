@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Callable
-from pathlib import Path
-
 import numpy as np
 import pytest
 
-from baro.met.domain import Cube, Domain, GridIndex
+from baro.met.domain import Domain, GridIndex
 
 GLOBAL_LAT = np.arange(90.0, -90.01, -0.25)
 GLOBAL_LON = np.arange(0.0, 360.0, 0.25)
@@ -41,27 +38,6 @@ def test_grid_index_keeps_two_points_for_a_single_location() -> None:
     assert len(g.lat) >= 2 and len(g.lon) >= 2
 
 
-def test_cube_round_trips_through_disk(make_cube: Callable[..., Cube], tmp_path: Path) -> None:
-    cube = make_cube()
-    cube.p_range = (20000.0, 30000.0)
-    path = tmp_path / "c.npz"
-    cube.save(path)
-    back = Cube.load(path)
-    assert back.hour == cube.hour and back.p_range == cube.p_range
-    np.testing.assert_array_equal(back.fields["u"], cube.fields["u"])
-    np.testing.assert_array_equal(back.vertical.ids, cube.vertical.ids)
-
-
-def test_cube_serves_only_narrower_requests(make_cube: Callable[..., Cube]) -> None:
-    cube = make_cube()
-    cube.p_range, cube.level_margin = (20000.0, 30000.0), 1
-    inner = Domain(41.0, 49.0, 355.5, 356.0)  # same place as -4.5..-4.0
-    assert cube.serves(inner, (21000.0, 29000.0), 1)
-    assert not cube.serves(inner, (19000.0, 29000.0), 1)
-    assert not cube.serves(inner, (21000.0, 29000.0), 2)
-    assert not cube.serves(Domain(41.0, 49.0, 9.0, 11.0), (21000.0, 29000.0), 1)
-
-
 @pytest.mark.parametrize(("lon_min", "lon_max"), [(10.0, 5.0), (0.0, 400.0)])
 def test_invalid_longitude_ranges_are_rejected(lon_min: float, lon_max: float) -> None:
     with pytest.raises(ValueError, match="longitude"):
@@ -73,13 +49,6 @@ def test_points_spanning_the_globe_get_the_whole_longitude_range() -> None:
     assert (d.lon_min, d.lon_max) == (-180.0, 180.0)
     with pytest.raises(ValueError, match="no points"):
         Domain.from_points([], [])
-
-
-def test_enclosing_domains() -> None:
-    outer = Domain(40.0, 50.0, 350.0, 370.0)
-    assert outer.encloses(Domain(41.0, 49.0, -5.0, 5.0))
-    assert not outer.encloses(Domain(41.0, 49.0, 5.0, 15.0))
-    assert Domain.whole_globe().encloses(Domain(-10.0, 10.0, 100.0, 200.0))
 
 
 # ARPEGE 0.1 deg Europe as the GRIB decoder returns it: 328 (-32) .. 402 (42) degrees east
