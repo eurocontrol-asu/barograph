@@ -13,6 +13,7 @@ from baro.met.base import CubeKey, DataUnavailableError, Source
 from baro.met.chain import SourceChain
 from baro.met.domain import Cube, Domain
 from baro.met.enrich import Enricher, EnrichResult, UncoveredPointsWarning
+from baro.met.immediate import AromePISource, PiafSource
 from baro.met.isa import pressure_from_altitude_ft
 from baro.met.kernel import Flag, SampleOptions, sample, track_components
 from baro.met.limits import set_host_limit
@@ -31,6 +32,7 @@ from baro.met.tiling import Tiling
 from baro.met.vertical import VerticalCoordinate, model_levels, pressure_levels
 
 __all__ = [
+    "AromePISource",
     "AromeSurfaceSource",
     "ArpegeSource",
     "Cube",
@@ -43,6 +45,7 @@ __all__ = [
     "GridSource",
     "OpenMeteoSource",
     "OpenMeteoSurfaceSource",
+    "PiafSource",
     "RangeCache",
     "SampleOptions",
     "Source",

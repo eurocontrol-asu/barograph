@@ -5,5 +5,6 @@
 - [AROME pressure-level archive](arome-pressure.md)
 - [Surface weather at fixed sites or trajectories](surface-weather.md)
 - [AROME surface forecasts by initialization](arome-runs.md)
+- [AROME-PI and PIAF immediate forecasts](immediate-forecasts.md)
 - [The FastMeteo-compatible façade](fastmeteo.md)
 - [Campaigns: cache, domains and parallelism](campaigns.md)

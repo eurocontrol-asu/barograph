@@ -44,6 +44,10 @@ along, cross = track_components(res["u"], res["v"], track_deg)
   archive; `AromeSurfaceSource` reads an explicit forecast run and preserves its
   initialization and lead. Precipitation totals and gust maxima retain their
   native periods. Neither interface requires pressure or altitude.
+- **Immediate forecasts**: authenticated `AromePISource` (15-minute surface
+  fields) and `PiafSource` (5-minute precipitation) preserve forecast runs and
+  request only the native grid neighbours needed by each query. See the
+  [access and caching guide](docs/howto/immediate-forecasts.md).
 - **Only the bytes a flight needs**: partial reads of the compressed blocks of
   ARCO-ERA5 chunks (levels × latitude band), of GRIB2 messages (variables ×
   levels × steps), and of Open-Meteo tiles; every time slice is read once for
