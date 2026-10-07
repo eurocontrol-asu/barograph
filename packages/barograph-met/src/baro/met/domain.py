@@ -129,8 +129,11 @@ class GridIndex:
             j1 = min(max(j1, j0 + 1), j0 + nlon)
         else:
             j0, j1 = max(j0, 0), min(j1, nlon - 1)
-            if j1 - j0 < 1:  # domain outside the grid: keep a 2-column sliver (all flagged)
-                j0, j1 = (nlon - 2, nlon - 1) if j0 >= nlon - 1 else (0, 1)
+            if j1 - j0 < 1:
+                # Inside: keep the location's neighbour. Outside: use the
+                # nearest edge sliver so sampling can flag the point.
+                j0 = min(max(j0, 0), nlon - 2)
+                j1 = j0 + 1
         j = np.arange(j0, j1 + 1, dtype=np.int64)
         return cls(
             rows=slice(i0, i1 + 1),
