@@ -39,6 +39,42 @@ def _reference(date: int, time: int) -> np.datetime64:
     )
 
 
+def _product_metadata(handle: int, field: str, run: np.datetime64, step_h: float) -> str:
+    """Validate the deterministic product and its explicit reference timestamps."""
+    import eccodes
+
+    template = eccodes.codes_get(handle, "productDefinitionTemplateNumber")
+    if template not in {0, 8}:
+        raise GribFormatError("only deterministic GRIB templates 4.0 and 4.8 are supported")
+    if field in {"u10", "v10"} and eccodes.codes_get(handle, "uvRelativeToGrid"):
+        raise GribFormatError("grid-relative wind components are unsupported")
+    actual_run = _reference(
+        int(eccodes.codes_get(handle, "dataDate")),
+        int(eccodes.codes_get(handle, "dataTime")),
+    )
+    if actual_run != run:
+        raise GribFormatError("response reference run differs from requested run")
+    actual_valid = _reference(
+        int(eccodes.codes_get(handle, "validityDate")),
+        int(eccodes.codes_get(handle, "validityTime")),
+    )
+    expected_valid = run + np.timedelta64(round(step_h * 3600), "s")
+    if actual_valid != expected_valid:
+        raise GribFormatError("inconsistent GRIB validity and forecast interval")
+    return str(eccodes.codes_get(handle, "units"))
+
+
+def _parameter(msg: GribMessage, field: str, units: str) -> None:
+    """Match a canonical field's parameter, vertical coordinate and physical unit."""
+    param, level_type, level, unit = _PARAMS[field]
+    # Surface (type 1) has no numeric coordinate: PIAF encodes it missing.
+    level_matches = msg.level == level or (level_type == 1 and np.isnan(msg.level))
+    if msg.param != param or msg.level_type != level_type or not level_matches:
+        raise GribFormatError(f"unexpected parameter or vertical level for {field}")
+    if units != unit:
+        raise GribFormatError(f"unexpected unit {units!r} for {field}; expected {unit}")
+
+
 def _semantics(buf: bytes, field: str, run: np.datetime64) -> GribMessage:
     import eccodes
 
@@ -49,35 +85,38 @@ def _semantics(buf: bytes, field: str, run: np.datetime64) -> GribMessage:
         raise GribFormatError("unsupported GRIB forecast time unit")
     handle = eccodes.codes_new_from_message(buf)
     try:
-        template = eccodes.codes_get(handle, "productDefinitionTemplateNumber")
-        if template not in {0, 8}:
-            raise GribFormatError("only deterministic GRIB templates 4.0 and 4.8 are supported")
-        if field in {"u10", "v10"} and eccodes.codes_get(handle, "uvRelativeToGrid"):
-            raise GribFormatError("grid-relative wind components are unsupported")
-        actual_run = _reference(
-            int(eccodes.codes_get(handle, "dataDate")),
-            int(eccodes.codes_get(handle, "dataTime")),
-        )
-        if actual_run != run:
-            raise GribFormatError("response reference run differs from requested run")
-        actual_valid = _reference(
-            int(eccodes.codes_get(handle, "validityDate")),
-            int(eccodes.codes_get(handle, "validityTime")),
-        )
-        expected_valid = run + np.timedelta64(round(msg.step_h * 3600), "s")
-        if actual_valid != expected_valid:
-            raise GribFormatError("inconsistent GRIB validity and forecast interval")
-        units = eccodes.codes_get(handle, "units")
+        units = _product_metadata(handle, field, run, msg.step_h)
     finally:
         eccodes.codes_release(handle)
-    param, level_type, level, unit = _PARAMS[field]
-    # Surface (type 1) has no numeric coordinate: PIAF encodes it missing.
-    level_matches = msg.level == level or (level_type == 1 and np.isnan(msg.level))
-    if msg.param != param or msg.level_type != level_type or not level_matches:
-        raise GribFormatError(f"unexpected parameter or vertical level for {field}")
-    if units != unit:
-        raise GribFormatError(f"unexpected unit {units!r} for {field}; expected {unit}")
+    _parameter(msg, field, units)
     return msg
+
+
+def _statistical_start(msg: GribMessage, field: str, run: np.datetime64) -> np.datetime64:
+    """Decode the start only for the expected statistical process and known units."""
+    process = 1 if field in _AMOUNTS else 2
+    if msg.statistical_process != process or msg.start_step_h is None:
+        raise GribFormatError("expected an accumulation or interval maximum")
+    if not np.isfinite(msg.start_step_h):
+        raise GribFormatError("unsupported GRIB interval time unit")
+    return run + np.timedelta64(round(msg.start_step_h * 3600), "s")
+
+
+def _period_bounds(
+    msg: GribMessage,
+    field: str,
+    run: np.datetime64,
+    end: np.datetime64,
+    interval_seconds: int,
+) -> np.datetime64:
+    """Accept a native statistical period, or a cumulative precipitation counter."""
+    start = _statistical_start(msg, field, run)
+    native_start = end - np.timedelta64(interval_seconds, "s")
+    if start >= end or start < run:
+        raise GribFormatError("invalid statistical interval")
+    if start != native_start and not (field in _AMOUNTS and start == run):
+        raise GribFormatError("statistical interval is neither native nor cumulative from run")
+    return start
 
 
 def _bounds(
@@ -96,18 +135,7 @@ def _bounds(
         if msg.statistical_process is not None:
             raise GribFormatError("instantaneous field has statistical processing")
         return None
-    process = 1 if field in _AMOUNTS else 2
-    if msg.statistical_process != process or msg.start_step_h is None:
-        raise GribFormatError("expected an accumulation or interval maximum")
-    if not np.isfinite(msg.start_step_h):
-        raise GribFormatError("unsupported GRIB interval time unit")
-    start = run + np.timedelta64(round(msg.start_step_h * 3600), "s")
-    native_start = end - np.timedelta64(interval_seconds, "s")
-    if start >= end or start < run:
-        raise GribFormatError("invalid statistical interval")
-    if start != native_start and not (field in _AMOUNTS and start == run):
-        raise GribFormatError("statistical interval is neither native nor cumulative from run")
-    return start
+    return _period_bounds(msg, field, run, end, interval_seconds)
 
 
 def decode_surface_response(
