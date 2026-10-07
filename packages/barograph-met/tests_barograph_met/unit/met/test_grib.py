@@ -69,3 +69,36 @@ def test_signed_fields_use_sign_and_magnitude() -> None:
     # scale factor -1 is 0x81 in GRIB2 (two's complement would read -127)
     msg = parse_header(_message(level_pa=2500, scale=b"\x81"), offset=0)
     assert msg.level == pytest.approx(25000.0)
+
+
+def test_statistical_interval_indexes_valid_end_not_start() -> None:
+    blob = _message(step=0)
+    parts = []
+    pos = 16
+    while pos < len(blob) - 4:
+        length, number = struct.unpack(">IB", blob[pos : pos + 5])
+        sec = bytearray(blob[pos : pos + length])
+        if number == 4:
+            sec.extend(bytes(58 - len(sec)))
+            sec[:4] = struct.pack(">I", 58)
+            sec[7:9] = struct.pack(">H", 8)
+            sec[41] = 1
+            sec[46] = 1
+            sec[48] = 1
+            sec[49:53] = struct.pack(">I", 6)
+        parts.append(bytes(sec))
+        pos += length
+    body = b"".join(parts)
+    statistical = blob[:8] + struct.pack(">Q", 16 + len(body) + 4) + body + b"7777"
+    msg = parse_header(statistical, 0)
+    assert msg.start_step_h == 0 and msg.step_h == 6
+    assert msg.statistical_process == 1
+    idx = GribIndex("period", len(statistical), [msg])
+    assert idx.find(msg.param, msg.level_type, msg.level, 0) is None
+    assert idx.find(msg.param, msg.level_type, msg.level, 6) is msg
+    assert GribIndex.from_json(idx.to_json()).messages == [msg]
+
+
+def test_old_index_is_rejected_for_rebuild() -> None:
+    with pytest.raises(ValueError, match="obsolete"):
+        GribIndex.from_json('{"key":"old","size":0,"messages":[]}')
