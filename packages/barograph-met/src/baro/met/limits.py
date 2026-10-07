@@ -26,6 +26,8 @@ __all__ = ["DEFAULT_HOST_LIMITS", "host_limit", "run_async", "set_host_limit", "
 DEFAULT_HOST_LIMITS: dict[str, int] = {
     "storage.googleapis.com": 32,  # ARCO-ERA5
     "amazonaws.com": 32,  # Open-Meteo archive (and other S3 open data)
+    "public-api.meteofrance.fr": 1,  # authenticated WCS, 100 requests/minute
+    "api.meteofrance.fr": 1,
     "files.data.gouv.fr": 6,  # Météo-France open data entry point
     "object.data.gouv.fr": 6,
     "meteofrance-pnt.s3.rbx.io.cloud.ovh.net": 6,  # Météo-France object storage

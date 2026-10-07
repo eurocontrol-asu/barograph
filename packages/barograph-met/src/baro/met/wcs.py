@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 import time
 from collections.abc import Callable, Sequence
+from email.utils import parsedate_to_datetime
 from types import TracebackType
 from urllib.parse import urlencode
 from xml.etree import ElementTree as ET
@@ -17,6 +18,7 @@ from xml.etree import ElementTree as ET
 import httpx
 import numpy as np
 
+from baro.met.limits import slot
 from baro.met.rangecache import RangeCache, namespace_for
 from baro.met.store import TransferStats
 
@@ -74,17 +76,32 @@ def _grib(data: bytes) -> None:
         raise WCSRequestError("WCS returned an empty coverage")
 
 
+def _retry_delay(value: str | None, attempt: int) -> float:
+    if value is not None:
+        try:
+            delay = float(value)
+        except ValueError:
+            try:
+                delay = parsedate_to_datetime(value).timestamp() - time.time()
+            except (ValueError, TypeError, OverflowError):
+                delay = float(2**attempt)
+        if np.isfinite(delay):
+            return max(0.0, delay)
+    return float(2**attempt)
+
+
 class WCSClient:
     """Small WCS client with credential-independent immutable response caching.
 
     ``endpoint`` ends at the service name, before ``/GetCapabilities``.
     ``auth='apikey'`` sends the token in the ``apikey`` header instead of Bearer.
     An injected HTTP client remains owned by its caller. No automatic retry is
-    made: rate limiting and unavailable services are reported without hiding a
-    potentially large sequence of requests.
+    made for authentication failures. Transient HTTP failures retry twice by
+    default, honoring Retry-After up to 60 seconds; longer delays raise rather
+    than retry earlier than the server requested.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         endpoint: str,
         token: str | Callable[[], str],
@@ -92,12 +109,16 @@ class WCSClient:
         client: httpx.Client | None = None,
         cache: RangeCache | None = None,
         auth: str = "bearer",
+        retries: int = 2,
     ) -> None:
         url = httpx.URL(endpoint)
         if url.scheme != "https" or url.username or url.password or url.query or url.fragment:
             raise ValueError("WCS endpoint must be HTTPS without credentials, query or fragment")
         if auth not in {"bearer", "apikey"}:
             raise ValueError("auth must be 'bearer' or 'apikey'")
+        if retries < 0:
+            raise ValueError("retries must be nonnegative")
+        self.retries = retries
         self.endpoint = endpoint.rstrip("/")
         self._token = token
         self._auth = auth
@@ -107,29 +128,45 @@ class WCSClient:
         self.stats = TransferStats()
         self._namespace = namespace_for(self.endpoint)
 
-    def _request(self, operation: str, params: list[tuple[str, str]]) -> bytes:
+    def _headers(self) -> dict[str, str]:
         token = self._token() if callable(self._token) else self._token
-        if not token or not token.strip():
-            raise WCSAuthenticationError("A nonempty Météo-France API token is required")
-        headers = (
-            {"Authorization": f"Bearer {token}"} if self._auth == "bearer" else {"apikey": token}
-        )
+        if not token or not token.isascii() or not token.isprintable() or " " in token:
+            raise WCSAuthenticationError("A valid nonempty Météo-France API token is required")
+        return {"Authorization": f"Bearer {token}"} if self._auth == "bearer" else {"apikey": token}
+
+    def _request(self, operation: str, params: list[tuple[str, str]]) -> bytes:
+        for attempt in range(self.retries + 1):
+            response = self._send(operation, params)
+            if response.status_code in {401, 403}:
+                raise WCSAuthenticationError(
+                    f"WCS authentication failed (HTTP {response.status_code})"
+                )
+            if response.status_code in {429, 500, 502, 503, 504} and attempt < self.retries:
+                delay = _retry_delay(response.headers.get("retry-after"), attempt)
+                if delay <= 60:  # noqa: PLR2004
+                    self.stats.throttle()
+                    time.sleep(delay)
+                    continue
+            if not response.is_success:
+                raise WCSRequestError(f"WCS request failed (HTTP {response.status_code})")
+            return response.content
+        raise AssertionError("unreachable")  # pragma: no cover
+
+    def _send(self, operation: str, params: list[tuple[str, str]]) -> httpx.Response:
+        headers = self._headers()
         started = time.monotonic()
         try:
-            response = self._client.get(
-                f"{self.endpoint}/{operation}",
-                params=tuple(params),
-                headers=headers,
-                follow_redirects=False,
-            )
+            with slot(self.endpoint):
+                response = self._client.get(
+                    f"{self.endpoint}/{operation}",
+                    params=tuple(params),
+                    headers=headers,
+                    follow_redirects=False,
+                )
         except httpx.RequestError:
             raise WCSRequestError("WCS transport request failed") from None
         self.stats.add(len(response.content), time.monotonic() - started)
-        if response.status_code in {401, 403}:
-            raise WCSAuthenticationError(f"WCS authentication failed (HTTP {response.status_code})")
-        if not response.is_success:
-            raise WCSRequestError(f"WCS request failed (HTTP {response.status_code})")
-        return response.content
+        return response
 
     @staticmethod
     def _params() -> list[tuple[str, str]]:

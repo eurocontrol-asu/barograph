@@ -77,7 +77,7 @@ def test_subsets_cache_and_credentials(tmp_path: Path) -> None:
 )
 def test_http_errors(status: int, error: type[WCSRequestError]) -> None:
     with httpx.Client(transport=httpx.MockTransport(lambda _: httpx.Response(status))) as client:
-        source = WCSClient(ENDPOINT, "secret", client=client)
+        source = WCSClient(ENDPOINT, "secret", client=client, retries=0)
         with pytest.raises(error, match="HTTP"):
             source.capabilities()
 
@@ -136,3 +136,73 @@ def test_transport_error_sanitized() -> None:
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         with pytest.raises(WCSRequestError, match="transport request failed"):
             WCSClient(ENDPOINT, "secret", client=client).capabilities()
+
+
+def test_redirect_never_forwards_credentials() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(302, headers={"Location": "https://other.example/collect"})
+
+    with httpx.Client(transport=httpx.MockTransport(handler), follow_redirects=True) as client:
+        with pytest.raises(WCSRequestError, match="302"):
+            WCSClient(ENDPOINT, "secret", client=client, auth="apikey").capabilities()
+    assert len(seen) == 1
+    assert seen[0].url.host == "weather.example"
+
+
+@pytest.mark.parametrize("token", ["secret\nvalue", "secret value", "clé"])
+def test_invalid_token_never_exposed(token: str) -> None:
+    with WCSClient(ENDPOINT, token) as source:
+        with pytest.raises(WCSAuthenticationError) as error:
+            source.capabilities()
+    assert token not in str(error.value)
+
+
+def test_retry_after_and_token_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
+    delays: list[float] = []
+    seen: list[httpx.Request] = []
+    monkeypatch.setattr("baro.met.wcs.time.sleep", delays.append)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if len(seen) < 3:
+            return httpx.Response(429, headers={"Retry-After": "0.25"})
+        return httpx.Response(200, content=GRIB)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        source = WCSClient(ENDPOINT, lambda: f"token{len(seen)}", client=client)
+        assert source.coverage(COVERAGE, subsets=[]) == GRIB
+        assert source.stats.throttled == 2
+    assert delays == [0.25, 0.25]
+    assert [r.headers["Authorization"] for r in seen] == [
+        "Bearer token0",
+        "Bearer token1",
+        "Bearer token2",
+    ]
+
+
+def test_retry_after_long_does_not_retry_early(monkeypatch: pytest.MonkeyPatch) -> None:
+    delays: list[float] = []
+    monkeypatch.setattr("baro.met.wcs.time.sleep", delays.append)
+    with httpx.Client(
+        transport=httpx.MockTransport(lambda _: httpx.Response(429, headers={"Retry-After": "120"}))
+    ) as client:
+        source = WCSClient(ENDPOINT, "secret", client=client)
+        with pytest.raises(WCSRequestError, match="429"):
+            source.capabilities()
+        assert source.stats.requests == 1
+    assert not delays
+
+
+@pytest.mark.parametrize(
+    "header,delay", [("bad", 1.0), ("NaN", 1.0), ("Wed, 07 Oct 2026 12:00:05 GMT", 5.0)]
+)
+def test_retry_after_date_or_fallback(
+    header: str, delay: float, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from baro.met.wcs import _retry_delay
+
+    monkeypatch.setattr("baro.met.wcs.time.time", lambda: 1791374400.0)
+    assert _retry_delay(header, 0) == delay
