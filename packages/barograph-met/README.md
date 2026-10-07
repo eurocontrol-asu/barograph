@@ -19,6 +19,8 @@
 
 `barograph-met` interpolates wind (`u`, `v`) and temperature (`t`) at
 aircraft positions (time, latitude, longitude, barometric altitude).
+It also retrieves surface weather at fixed sites or along trajectories using
+only time, latitude and longitude.
 
 ```python
 from baro.met import Enricher, arco_model_levels, track_components
@@ -37,6 +39,11 @@ along, cross = track_components(res["u"], res["v"], track_deg)
   Météo-France ARPEGE open data, 0.1° Europe or 0.25° global
   (`ArpegeSource`); the Open-Meteo archive of ARPEGE from December 2023
   (`OpenMeteoSource`); any of them chained (`SourceChain`).
+- **Surface weather**: 10 m wind and direction, gusts, precipitation and 2 m
+  temperature with `SurfaceEnricher`. `OpenMeteoSurfaceSource` reads the stitched
+  archive; `AromeSurfaceSource` reads an explicit forecast run and preserves its
+  initialization and lead. Precipitation totals and gust maxima retain their
+  native periods. Neither interface requires pressure or altitude.
 - **Only the bytes a flight needs**: partial reads of the compressed blocks of
   ARCO-ERA5 chunks (levels × latitude band), of GRIB2 messages (variables ×
   levels × steps), and of Open-Meteo tiles; every time slice is read once for

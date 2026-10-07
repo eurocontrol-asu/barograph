@@ -22,8 +22,10 @@ source.close()
 The canonical fields are `u10`, `v10` (m/s), `t2m` (K), `precipitation` (mm)
 and `gusts` (m/s). Map output names with `fields={"temperature": "t2m"}`
 to retrieve only selected variables. Heights are above the model ground;
-queries require no altitude. Wind speed and meteorological direction can be
-calculated from the interpolated horizontal components.
+queries require no altitude. `SurfaceEnricher` also returns `wind_speed` and
+`wind_direction`, calculated from the interpolated horizontal components.
+Direction is the meteorological wind-from direction, in degrees clockwise
+from true north; it is undefined (NaN) for exactly calm wind.
 
 Precipitation is the total water equivalent during the preceding hour, obtained
 by subtracting cumulative values from the **same initialization**, including

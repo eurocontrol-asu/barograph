@@ -81,6 +81,7 @@ class AromeSurfaceSource:
             raise ValueError("unknown or empty AROME surface fields")
         self.variables = {out: _VARIABLES[name] for out, name in self.fields.items()}
         self.source_id = "arome-0025-surface"
+        self._forecast.source_id = self.source_id
         if index_dir is not None:
             self.indexes.directory = Path(index_dir).expanduser() / self.source_id
 

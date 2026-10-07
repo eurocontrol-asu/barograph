@@ -1,12 +1,13 @@
 """Fast weather retrieval along aircraft trajectories.
 
-ERA5 on its 137 model levels (or pressure levels), Météo-France ARPEGE (live
-open data and the Open-Meteo archive), interpolated at aircraft positions with
-explicit coverage and no silent extrapolation.
+ERA5 on model or pressure levels and forecast fields from Météo-France and
+Open-Meteo, interpolated with explicit coverage and no silent extrapolation.
+Surface queries accept fixed sites or trajectories without altitude.
 """
 
 from __future__ import annotations
 
+from baro.met.arome_surface import AromeSurfaceSource
 from baro.met.arpege import ArpegeSource
 from baro.met.base import CubeKey, DataUnavailableError, Source
 from baro.met.chain import SourceChain
@@ -30,6 +31,7 @@ from baro.met.tiling import Tiling
 from baro.met.vertical import VerticalCoordinate, model_levels, pressure_levels
 
 __all__ = [
+    "AromeSurfaceSource",
     "ArpegeSource",
     "Cube",
     "CubeKey",
