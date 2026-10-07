@@ -16,8 +16,16 @@ from baro.met.isa import pressure_from_altitude_ft
 from baro.met.kernel import Flag, SampleOptions, sample, track_components
 from baro.met.limits import set_host_limit
 from baro.met.openmeteo import OpenMeteoSource
+from baro.met.openmeteo_surface import OpenMeteoSurfaceSource
 from baro.met.rangecache import RangeCache
 from baro.met.sources import GridSource, arco_model_levels, arco_pressure_levels
+from baro.met.surface import (
+    SurfaceCube,
+    SurfaceEnricher,
+    SurfaceResult,
+    SurfaceSource,
+    SurfaceVariable,
+)
 from baro.met.tiling import Tiling
 from baro.met.vertical import VerticalCoordinate, model_levels, pressure_levels
 
@@ -32,10 +40,16 @@ __all__ = [
     "Flag",
     "GridSource",
     "OpenMeteoSource",
+    "OpenMeteoSurfaceSource",
     "RangeCache",
     "SampleOptions",
     "Source",
     "SourceChain",
+    "SurfaceCube",
+    "SurfaceEnricher",
+    "SurfaceResult",
+    "SurfaceSource",
+    "SurfaceVariable",
     "Tiling",
     "UncoveredPointsWarning",
     "VerticalCoordinate",

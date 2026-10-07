@@ -410,3 +410,50 @@ def write_openmeteo_mirror(root: Path, step_hours: int = 1) -> Path:
     }
     (base / "static" / "meta.json").write_text(json.dumps(meta))
     return root
+
+
+def write_openmeteo_surface_mirror(root: Path, step_hours: int = 1) -> Path:
+    """Two surface archive chunks, with analytic instants and distinct period totals."""
+    import omfiles
+
+    first = int(EPOCH.astype("datetime64[s]").astype(np.int64)) // (24 * step_hours * 3600)
+    folder = root / "data" / OM_MODEL
+    lat, lon = np.meshgrid(OM_LAT, OM_LON, indexing="ij")
+    for layout, chunk in enumerate((first, first + 1)):
+        h0 = chunk * 24 * step_hours - int(EPOCH.astype("int64"))
+        hours = h0 + np.arange(24) * step_hours
+        values = {
+            "wind_u_component_10m": np.stack(
+                [2 + 0.1 * lat + 0.2 * lon + 0.5 * h for h in hours], axis=-1
+            ),
+            "wind_v_component_10m": np.stack(
+                [3 - 0.1 * lat + 0.05 * lon - 0.2 * h for h in hours], axis=-1
+            ),
+            "temperature_2m": np.stack(
+                [10 + 0.3 * lat + 0.5 * h + 0 * lon for h in hours], axis=-1
+            ),
+            "precipitation": np.stack([np.full_like(lat, h % 5) for h in hours], axis=-1),
+            "snowfall_water_equivalent": np.stack(
+                [np.full_like(lat, 0.5 * (h % 3)) for h in hours], axis=-1
+            ),
+            "wind_gusts_10m": np.stack([np.full_like(lat, 10 + h % 7) for h in hours], axis=-1),
+        }
+        for name, data in values.items():
+            path = folder / name
+            path.mkdir(parents=True, exist_ok=True)
+            chunks = [1, 14, 24] if layout else [14, 24]
+            if not layout:
+                data = data.reshape(-1, 24)
+            writer = omfiles.OmFileWriter.at_path(str(path / f"chunk_{chunk}.om"))
+            writer.close(
+                writer.write_array(data.astype(np.float32), chunks=chunks, scale_factor=100.0)
+            )
+    (folder / "static").mkdir(parents=True, exist_ok=True)
+    metadata = {
+        "chunk_time_length": 24,
+        "temporal_resolution_seconds": 3600 * step_hours,
+        "data_end_time": (first + 2) * 24 * step_hours * 3600,
+        "crs_wkt": "BBOX[40,-5,50,10]",
+    }
+    (folder / "static" / "meta.json").write_text(json.dumps(metadata))
+    return root
