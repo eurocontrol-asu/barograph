@@ -30,6 +30,46 @@ _MIN_AXIS_POINTS = 2
 __all__ = ["SurfaceCube", "SurfaceEnricher", "SurfaceResult", "SurfaceSource", "SurfaceVariable"]
 
 
+type _Coordinates = tuple[NDArray[np.datetime64], NDArray[np.float64], NDArray[np.float64]]
+type _Samples = dict[int, tuple[dict[str, NDArray[np.float64]], NDArray[np.uint8]]]
+
+
+def _inputs(time: ArrayLike, lat: ArrayLike, lon: ArrayLike) -> _Coordinates:
+    try:
+        times, la, lo = np.broadcast_arrays(
+            np.asarray(time, dtype="datetime64[ns]"),
+            np.asarray(lat, dtype=float),
+            np.asarray(lon, dtype=float),
+        )
+    except ValueError as exc:
+        raise ValueError("time, latitude and longitude must broadcast to the same shape") from exc
+    return times.ravel(), la.ravel(), lo.ravel()
+
+
+def _instant(
+    samples: _Samples, name: str, weight: NDArray[np.float64]
+) -> tuple[NDArray[np.float64], NDArray[np.uint8]]:
+    values, flags = samples[0][0][name].copy(), samples[0][1].copy()
+    if 1 in samples:
+        active = weight != 0
+        values[active] = (1 - weight[active]) * values[active] + weight[active] * samples[1][0][
+            name
+        ][active]
+        flags[active] |= samples[1][1][active]
+    return values, flags
+
+
+def _period(
+    samples: _Samples, name: str, weight: NDArray[np.float64]
+) -> tuple[NDArray[np.float64], NDArray[np.uint8]]:
+    values, flags = np.full(len(weight), np.nan), np.zeros(len(weight), dtype=np.uint8)
+    for which, (fields, why) in samples.items():
+        active = (weight == 0) if which == 0 else (weight != 0)
+        if active.any():
+            values[active], flags[active] = fields[name][active], why[active]
+    return values, flags
+
+
 @dataclass(frozen=True)
 class SurfaceVariable:
     """Unit, height above ground and native temporal meaning of one field."""
@@ -177,17 +217,7 @@ class SurfaceEnricher:
 
     def enrich(self, time: ArrayLike, lat: ArrayLike, lon: ArrayLike) -> SurfaceResult:
         """Interpolate instants; preserve the enclosing native totals and maxima."""
-        try:
-            times, la, lo = np.broadcast_arrays(
-                np.asarray(time, dtype="datetime64[ns]"),
-                np.asarray(lat, dtype=float),
-                np.asarray(lon, dtype=float),
-            )
-        except ValueError as exc:
-            raise ValueError(
-                "time, latitude and longitude must broadcast to the same shape"
-            ) from exc
-        times, la, lo = times.ravel(), la.ravel(), lo.ravel()
+        times, la, lo = _inputs(time, lat, lon)
         result = self._empty(times)
         valid = ~np.isnat(times) & np.isfinite(la) & np.isfinite(lo) & (abs(la) <= LAT_LIMIT)
         result.flags[~valid] = Flag.INVALID_INPUT
@@ -205,24 +235,34 @@ class SurfaceEnricher:
         for group in np.unique(groups):
             selected = points[groups == group]
             t0 = np.datetime64(int(group) * step_ns, "ns")
-            try:
-                keys = self.source.cube_keys(t0)
-                tiling = self.source.tiling(keys[0])
-            except DataUnavailableError:
-                result.flags[selected] = Flag.MISSING_DATA
-                continue
-            if keys[0].run != keys[1].run:
-                raise ValueError("surface interpolation requires both endpoints from the same run")
-            labels = partition(la[selected], lo[selected], 0.0, tiling)
-            for label in np.unique(labels):
-                sel = selected[labels == label]
-                exact = times[sel] == keys[0].valid
-                for mask in (exact, ~exact):
-                    if mask.any():
-                        self._group(result, times, la, lo, sel[mask], keys)
+            self._interval(result, (times, la, lo), selected, t0)
         self._wind(result, times)
         result.stats = {"bytes": sum(s.bytes for s in self.source.stats) - before}
         return result
+
+    def _interval(
+        self,
+        result: SurfaceResult,
+        coordinates: _Coordinates,
+        selected: NDArray[np.int64],
+        t0: np.datetime64,
+    ) -> None:
+        times, la, lo = coordinates
+        try:
+            keys = self.source.cube_keys(t0)
+            tiling = self.source.tiling(keys[0])
+        except DataUnavailableError:
+            result.flags[selected] = Flag.MISSING_DATA
+            return
+        if keys[0].run != keys[1].run:
+            raise ValueError("surface interpolation requires both endpoints from the same run")
+        labels = partition(la[selected], lo[selected], 0.0, tiling)
+        for label in np.unique(labels):
+            sel = selected[labels == label]
+            exact = times[sel] == keys[0].valid
+            for mask in (exact, ~exact):
+                if mask.any():
+                    self._group(result, coordinates, sel[mask], keys)
 
     def _wind(self, result: SurfaceResult, times: NDArray[np.datetime64]) -> None:
         if self.wind_components is None or not all(
@@ -259,51 +299,29 @@ class SurfaceEnricher:
             np.full(n, np.timedelta64("NaT", "ns")),
         )
 
-    def _group(  # noqa: PLR0913, PLR0917 - private point-group interpolation
+    def _group(
         self,
         result: SurfaceResult,
-        times: NDArray[np.datetime64],
-        lat: NDArray[np.float64],
-        lon: NDArray[np.float64],
+        coordinates: _Coordinates,
         sel: NDArray[np.int64],
         keys: tuple[CubeKey, CubeKey],
     ) -> None:
+        times, lat, lon = coordinates
         domain = Domain.from_points(lat[sel], lon[sel], margin=0.0)
         w = np.asarray((times[sel] - keys[0].valid) / (keys[1].valid - keys[0].valid), dtype=float)
-        instant = any(v.temporal == "instant" for v in result.variables.values())
-        # Exact native timestamps (including the final archive sample) need no future cube.
-        needed = ([0] if instant or np.any(w == 0) else []) + ([1] if np.any(w != 0) else [])
-        sampled = {}
         try:
-            for which in needed:
-                names = tuple(
-                    n
-                    for n, v in result.variables.items()
-                    if which != 0 or np.all(w == 0) or v.temporal == "instant"
-                )
-                cube = self.source.fetch(keys[which], domain, fields=names)
-                sampled[which] = cube.sample(lat[sel], lon[sel], fields=names)
+            sampled = self._samples(keys, domain, (lat[sel], lon[sel]), w)
         except DataUnavailableError:
             result.flags[sel] |= np.uint8(Flag.MISSING_DATA)
             return
         for name, variable in result.variables.items():
             if variable.temporal == "instant":
-                value, flags = sampled[0][0][name].copy(), sampled[0][1].copy()
-                if 1 in sampled:
-                    active = w != 0
-                    value[active] = (1 - w[active]) * value[active] + w[active] * sampled[1][0][
-                        name
-                    ][active]
-                    flags[active] |= sampled[1][1][active]
+                value, flags = _instant(sampled, name, w)
                 begin = finish = times[sel]
             else:
-                value, flags = np.full(len(sel), np.nan), np.zeros(len(sel), dtype=np.uint8)
+                value, flags = _period(sampled, name, w)
                 finish = np.where(w == 0, keys[0].valid, keys[1].valid).astype("datetime64[ns]")
                 begin = finish - self.source.time_step
-                for which, (values, why) in sampled.items():
-                    active = (w == 0) if which == 0 else (w != 0)
-                    if active.any():
-                        value[active], flags[active] = values[name][active], why[active]
             result.fields[name][sel] = value
             result.flags[sel] |= flags
             result.interval_start[name][sel], result.interval_end[name][sel] = begin, finish
@@ -313,3 +331,25 @@ class SurfaceEnricher:
             result.lead[sel] = times[sel] - key.run
         for value in result.fields.values():
             value[sel[result.flags[sel] != 0]] = np.nan
+
+    def _samples(
+        self,
+        keys: tuple[CubeKey, CubeKey],
+        domain: Domain,
+        positions: tuple[NDArray[np.float64], NDArray[np.float64]],
+        weight: NDArray[np.float64],
+    ) -> _Samples:
+        """Fetch only endpoints and fields that contribute to this point group."""
+        variables = self.source.variables
+        exact = np.all(weight == 0)
+        left = tuple(n for n, v in variables.items() if exact or v.temporal == "instant")
+        endpoints = {}
+        if left:
+            endpoints[0] = left
+        if np.any(weight != 0):
+            endpoints[1] = tuple(variables)
+        sampled = {}
+        for which, names in endpoints.items():
+            cube = self.source.fetch(keys[which], domain, fields=names)
+            sampled[which] = cube.sample(*positions, fields=names)
+        return sampled

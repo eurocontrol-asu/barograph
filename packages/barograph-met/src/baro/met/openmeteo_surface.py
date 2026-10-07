@@ -52,6 +52,42 @@ OPENMETEO_SURFACE_VARIABLES: dict[str, tuple[tuple[str, ...], float, SurfaceVari
 _DEFAULT_FIELDS = ("u10", "v10", "t2m", "precipitation", "rain", "gusts")
 
 
+def _field_mapping(fields: dict[str, str] | None) -> dict[str, str]:
+    """Validate public selections before any catalog or data I/O."""
+    selected = dict(fields if fields is not None else {n: n for n in _DEFAULT_FIELDS})
+    if not selected:
+        raise ValueError("at least one surface field is required")
+    unknown = set(selected.values()) - set(OPENMETEO_SURFACE_VARIABLES)
+    if unknown:
+        raise ValueError(f"unknown surface variables {sorted(unknown)}")
+    return selected
+
+
+def _native_variables(fields: dict[str, str]) -> list[str]:
+    """Native folders needed by the selected outputs, deduplicating shared inputs."""
+    return sorted({v for name in fields.values() for v in OPENMETEO_SURFACE_VARIABLES[name][0]})
+
+
+def _validate_storage(tile_deg: float, cache_mb: float) -> None:
+    if not all(np.isfinite(value) and value > 0 for value in (tile_deg, cache_mb)):
+        raise ValueError("tile_deg and cache_mb must be positive and finite")
+
+
+def _output_values(
+    native: dict[str, NDArray[np.float32]], fields: dict[str, str]
+) -> dict[str, NDArray[np.float32]]:
+    """Convert units and derive liquid precipitation on the native grid."""
+    values = {}
+    for out, name in fields.items():
+        dependencies, offset, _ = OPENMETEO_SURFACE_VARIABLES[name]
+        if name == "rain":
+            value = np.maximum(native[dependencies[0]] - native[dependencies[1]], 0)
+        else:
+            value = native[dependencies[0]] + offset
+        values[out] = np.asarray(value, dtype=np.float32)
+    return values
+
+
 class OpenMeteoSurfaceSource(_ArchiveSource):
     """Native surface fields of an Open-Meteo archived model.
 
@@ -94,20 +130,12 @@ class OpenMeteoSurfaceSource(_ArchiveSource):
     ) -> None:
         self.model = model
         self.merge_adjacent_tiles = merge_adjacent_tiles
-        self.fields = dict(fields if fields is not None else {n: n for n in _DEFAULT_FIELDS})
-        if not self.fields:
-            raise ValueError("at least one surface field is required")
-        unknown = set(self.fields.values()) - set(OPENMETEO_SURFACE_VARIABLES)
-        if unknown:
-            raise ValueError(f"unknown surface variables {sorted(unknown)}")
-        if not np.isfinite(tile_deg) or tile_deg <= 0 or not np.isfinite(cache_mb) or cache_mb <= 0:
-            raise ValueError("tile_deg and cache_mb must be positive and finite")
+        self.fields = _field_mapping(fields)
+        _validate_storage(tile_deg, cache_mb)
         self.variables = {
             out: OPENMETEO_SURFACE_VARIABLES[name][2] for out, name in self.fields.items()
         }
-        self._native = sorted(
-            {v for name in self.fields.values() for v in OPENMETEO_SURFACE_VARIABLES[name][0]}
-        )
+        self._native = _native_variables(self.fields)
         self.source_id = f"openmeteo-surface-{model}"
         self._stats = TransferStats()
         self.catalog = ArchiveCatalog(base_url, model, self._native, self._stats)
@@ -133,17 +161,8 @@ class OpenMeteoSurfaceSource(_ArchiveSource):
         selected = self.fields if fields is None else {n: self.fields[n] for n in fields}
         if not selected:
             raise ValueError("at least one surface field is required")
-        native_names = sorted(
-            {v for name in selected.values() for v in OPENMETEO_SURFACE_VARIABLES[name][0]}
-        )
-        start, end = self.coverage()
-        if not start <= key.valid <= end:
-            raise DataUnavailableError(f"{self.source_id}: {key.valid} outside {start}..{end}")
-        index = self.catalog.time_index(key.valid)
-        if key.valid != np.datetime64(index * self.catalog.step_seconds, "s"):
-            raise ValueError(f"{key.valid} is not aligned to {self.time_step}")
-        if key.run is not None:
-            raise ValueError("stitched archives do not retain forecast runs")
+        native_names = _native_variables(selected)
+        index = self._validate_key(key)
         chunk, t_in = divmod(index, self.catalog.chunk_steps)
         nlat, _ = self.reader.ensure_shape(*self._probe)
         lat, lon = self.reader.grid()
@@ -152,14 +171,7 @@ class OpenMeteoSurfaceSource(_ArchiveSource):
         blocks = self.reader.blocks([(v, 0) for v in native_names], chunk, rows, grid.cols)
         tp = self.reader.tile_points()
         native = {v: gather_tiles(blocks[(v, 0)], rows, grid.cols, tp, t_in) for v in native_names}
-        values: dict[str, NDArray[np.float32]] = {}
-        for out, name in selected.items():
-            dependencies, offset, _ = OPENMETEO_SURFACE_VARIABLES[name]
-            if name == "rain":
-                value = np.maximum(native[dependencies[0]] - native[dependencies[1]], 0)
-            else:
-                value = native[dependencies[0]] + offset
-            values[out] = np.asarray(value, dtype=np.float32)
+        values = _output_values(native, selected)
         return SurfaceCube(
             key,
             grid.lat[::-1].copy(),
@@ -167,6 +179,17 @@ class OpenMeteoSurfaceSource(_ArchiveSource):
             {n: a[::-1].copy() for n, a in values.items()},
             {n: self.variables[n] for n in selected},
         )
+
+    def _validate_key(self, key: CubeKey) -> int:
+        start, end = self.coverage()
+        if not start <= key.valid <= end:
+            raise DataUnavailableError(f"{self.source_id}: {key.valid} outside {start}..{end}")
+        index = self.catalog.time_index(key.valid)
+        if key.valid != np.datetime64(index * self.catalog.step_seconds, "s"):
+            raise ValueError(f"{key.valid} is not aligned to {self.time_step}")
+        if key.run is not None:
+            raise ValueError("stitched archives do not retain forecast runs")
+        return index
 
     def enrich(
         self, time: ArrayLike, lat: ArrayLike, lon: ArrayLike, *, cache: RangeCache | None = None
