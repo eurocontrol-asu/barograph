@@ -1,10 +1,10 @@
 {
-  "score": 98.1,
+  "score": 97.9,
   "grade": "A",
   "passed": [
     "ARCH_CIRCULAR: 0 circular import(s) found",
     "ARCH_GOD_CLASS: 0 god class(es) found",
-    "ARCH_COUPLING: Coupling: 8 module(s) above threshold (-24 pts)",
+    "ARCH_COUPLING: Coupling: 10 module(s) above threshold (-30 pts)",
     "ARCH_DUPLICATION: 0 duplicate block(s) found",
     "QUALITY_COMPLEXITY: Complexity score: 100/100 (0 high-complexity functions)",
     "QUALITY_TESTS: Test coverage: 92% (92/100)",
@@ -19,7 +19,12 @@
     "PRACTICE_TEST_SCENARIO_NAMING: No anti-mirror naming violations",
     "PRACTICE_BARE_EXCEPT: 0 bare except(s) found",
     "PRACTICE_BLOCKING_IO: 0 blocking-IO violation(s) found",
-    "PRACTICE_DOCSTRING: Docstring coverage: 100% (147/147)",
+    {
+      "rule_id": "PRACTICE_DOCSTRING",
+      "message": "Docstring coverage: 91% (159/174)",
+      "text": "     \u2022 baro/met/surface.py: stats, coverage, cube_keys, tiling, use_cache, fetch\n     \u2022 baro/met/arome_surface.py: stats, close, tiling, use_cache, published_runs, coverage, cube_keys, file_key, fetch",
+      "fix_hint": "Add docstrings to public functions"
+    },
     "PRACTICE_ENV_CREDENTIAL_READ: 0 credential environment read(s) found",
     {
       "rule_id": "PRACTICE_TOOL_SECRET_LOCATION",
