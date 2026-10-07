@@ -53,27 +53,32 @@ def _vector(vector: Element) -> tuple[list[str], NDArray[np.float64]]:
     return labels, values
 
 
+def _axis_step(axis: Element, name: str) -> NDArray[np.float64]:
+    """Validate the coordinate system and isolate one nonzero axis component."""
+    vector = _one(axis, "offsetVector")
+    labels, values = _vector(vector)
+    units = vector.attrib.get("uomLabels", "").split()
+    if len(set(labels)) != len(labels) or set(labels) not in (
+        {"long", "lat", "time"},
+        {"long", "lat", "height", "time"},
+    ):
+        raise ValueError("Unsupported WCS coordinate dimensions")
+    expected = {"long": "deg", "lat": "deg", "time": "s", "height": "m"}
+    if units != [expected[label] for label in labels] or len(values) != len(labels):
+        raise ValueError("Unsupported WCS axis units or offset vector")
+    index = labels.index(name)
+    if np.any(np.delete(values, index) != 0) or values[index] == 0:
+        raise ValueError("WCS rotated or degenerate grids are unsupported")
+    return values[index : index + 1]
+
+
 def _axes(root: Element) -> dict[str, tuple[Element, NDArray[np.float64]]]:
     result: dict[str, tuple[Element, NDArray[np.float64]]] = {}
     for axis in root.iterfind(".//{*}GeneralGridAxis"):
         name = (_one(axis, "gridAxesSpanned").text or "").strip()
         if name not in {"long", "lat", "time", "height"} or name in result:
             raise ValueError(f"Unsupported or repeated WCS axis {name!r}")
-        vector = _one(axis, "offsetVector")
-        labels, values = _vector(vector)
-        units = vector.attrib.get("uomLabels", "").split()
-        if len(set(labels)) != len(labels) or set(labels) not in (
-            {"long", "lat", "time"},
-            {"long", "lat", "height", "time"},
-        ):
-            raise ValueError("Unsupported WCS coordinate dimensions")
-        expected = {"long": "deg", "lat": "deg", "time": "s", "height": "m"}
-        if units != [expected[label] for label in labels] or len(values) != len(labels):
-            raise ValueError("Unsupported WCS axis units or offset vector")
-        index = labels.index(name)
-        if np.any(np.delete(values, index) != 0) or values[index] == 0:
-            raise ValueError("WCS rotated or degenerate grids are unsupported")
-        result[name] = (axis, values[index : index + 1])
+        result[name] = (axis, _axis_step(axis, name))
     if set(result) not in ({"long", "lat", "time"}, {"long", "lat", "time", "height"}):
         raise ValueError("WCS description is missing required axes")
     return result
@@ -126,6 +131,17 @@ _FIELD_NAMES = {
 }
 
 
+def _coverage_candidates(field: str, stamp: str, step_seconds: int) -> list[str]:
+    """Order exact field identifiers by native interval, then cumulative fallback."""
+    if field not in _FIELD_NAMES or step_seconds <= 0:
+        raise ValueError("Unsupported WCS field or temporal step")
+    suffix = f"_PT{step_seconds // 60}M" if step_seconds % 60 == 0 else f"_PT{step_seconds}S"
+    names = [
+        name for name in _FIELD_NAMES[field] if "_15MIN__" not in name or step_seconds == 15 * 60
+    ]
+    return [name + "___" + stamp + ending for ending in (suffix, "") for name in names]
+
+
 def select_coverage(
     ids: tuple[str, ...],
     field: str,
@@ -140,21 +156,11 @@ def select_coverage(
     Explicit overrides still require the requested run and catalog membership.
     """
     stamp = str(np.datetime_as_string(run, unit="s")).replace(":", ".") + "Z"
-    marker = "___" + stamp
     if override is not None:
         if override not in ids or override.split("___")[-1].split("_")[0] != stamp:
             raise ValueError("WCS coverage override must exist and match the requested run")
         return override
-    if field not in _FIELD_NAMES or step_seconds <= 0:
-        raise ValueError("Unsupported WCS field or temporal step")
-    suffix = f"_PT{step_seconds // 60}M" if step_seconds % 60 == 0 else f"_PT{step_seconds}S"
-    candidates = [
-        name + marker
-        for name in _FIELD_NAMES[field]
-        if "_15MIN__" not in name or step_seconds == 15 * 60
-    ]
-    for ending in (suffix, ""):
-        for candidate in candidates:
-            if candidate + ending in ids:
-                return candidate + ending
+    for candidate in _coverage_candidates(field, stamp, step_seconds):
+        if candidate in ids:
+            return candidate
     raise ValueError(f"No supported WCS coverage for {field} at {stamp}")
