@@ -113,8 +113,10 @@ class GridIndex:
         nlat, nlon = len(grid_lat), len(grid_lon)
         i0 = int(np.floor((domain.lat_max - grid_lat[0]) / dlat + 1e-9))
         i1 = int(np.ceil((domain.lat_min - grid_lat[0]) / dlat - 1e-9))
-        i0, i1 = max(i0, 0), min(max(i1, i0 + 1), nlat - 1)
-        i0 = min(i0, i1 - 1)
+        # A wholly outside regional domain still needs a valid two-row sliver:
+        # sampling flags its points rather than indexing beyond the archive.
+        i0 = min(max(i0, 0), nlat - 2)
+        i1 = min(max(i1, i0 + 1), nlat - 1)
         periodic = abs(nlon * dlon - FULL_TURN) < _PERIODIC_TOLERANCE
         lon0 = float(grid_lon[0])
         # periodic: keep the caller's framing (columns wrap); regional: the framing
