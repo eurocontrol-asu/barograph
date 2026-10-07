@@ -113,6 +113,8 @@ class ArpegeSource:
         Directory caching the per-file message indexes (strongly recommended;
         defaults to the enricher's cache when it has one).
 
+    Notes
+    -----
     The files of a published run never change: with a cache (:meth:`use_cache`)
     every GRIB message read is kept on disk and never downloaded again.
     """

@@ -11,7 +11,8 @@ For each of the four grid columns around a point, level pressures are
 computed from **that column's surface pressure**, the two levels bracketing
 the aircraft pressure are found, and the field is interpolated linearly in
 `ln p` (or `p`). The four column values are combined bilinearly, then the two
-hourly values linearly in time.
+native time-step values linearly in time (1 h for ERA5/ARPEGE, 3 h for
+the Open-Meteo IFS archive).
 
 Barometric altitude is a pressure altitude (standard setting), so converting
 it with the ICAO standard atmosphere is exact. A fixed altitude→level table

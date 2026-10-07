@@ -374,17 +374,17 @@ OM_LON = np.arange(-5.0, 10.01, 0.5)
 _OM_VARIABLES = {"u": "wind_u_component", "v": "wind_v_component", "t": "temperature"}
 
 
-def write_openmeteo_mirror(root: Path) -> Path:
-    """Two 24 h chunks covering 2020-01-01..02: old (lat*lon, time) then (lat, lon, time) layout."""
+def write_openmeteo_mirror(root: Path, step_hours: int = 1) -> Path:
+    """Two 24-sample chunks around EPOCH, in old then new archive layout."""
     import omfiles
 
     first = int((EPOCH - np.datetime64("1970-01-01T00", "h")) / np.timedelta64(1, "h"))
-    first //= OM_CHUNK_HOURS
+    first //= OM_CHUNK_HOURS * step_hours
     base = root / "data" / OM_MODEL
     glat, glon = np.meshgrid(OM_LAT, OM_LON, indexing="ij")
     for layout, chunk in enumerate((first, first + 1)):
-        hours0 = (chunk - first) * OM_CHUNK_HOURS
-        hours = hours0 + np.arange(OM_CHUNK_HOURS, dtype=np.float64)
+        hours0 = chunk * OM_CHUNK_HOURS * step_hours - int(EPOCH.astype("int64"))
+        hours = hours0 + np.arange(OM_CHUNK_HOURS, dtype=np.float64) * step_hours
         for name, variable in _OM_VARIABLES.items():
             for hpa in OM_LEVELS:
                 p = np.full_like(glat, hpa * 100.0)
@@ -401,11 +401,11 @@ def write_openmeteo_mirror(root: Path) -> Path:
                 writer = omfiles.OmFileWriter.at_path(str(folder / f"chunk_{chunk}.om"))
                 writer.close(writer.write_array(data, chunks=chunks, scale_factor=100.0))
     (base / "static").mkdir(parents=True, exist_ok=True)
-    end = (first + 2) * OM_CHUNK_HOURS - 1
+    end = (first + 2) * OM_CHUNK_HOURS
     meta = {
         "chunk_time_length": OM_CHUNK_HOURS,
-        "temporal_resolution_seconds": 3600,
-        "data_end_time": end * 3600,
+        "temporal_resolution_seconds": 3600 * step_hours,
+        "data_end_time": end * 3600 * step_hours,
         "crs_wkt": 'GEOGCRS["WGS 84", USAGE[SCOPE["grid"], BBOX[40.0,-5.0,50.0,10.0]]]',
     }
     (base / "static" / "meta.json").write_text(json.dumps(meta))
