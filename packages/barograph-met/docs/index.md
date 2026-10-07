@@ -9,6 +9,8 @@ longitude and barometric altitude — from:
 | ERA5, ARCO-ERA5 | `arco_pressure_levels(levels=...)` | 1940 → ~6 days ago | 37 pressure levels or a subset |
 | Météo-France ARPEGE open data | `ArpegeSource(resolution="01" \| "025")` | last ~14 days (+ forecast) | 24 / 34 pressure levels |
 | ARPEGE, Open-Meteo archive | `OpenMeteoSource("meteofrance_arpege_europe")` | from 2023-12-01 | 24 / 34 pressure levels |
+| AROME, Open-Meteo archive | `OpenMeteoSource("meteofrance_arome_france0025")` | from late December 2023 | 24 pressure levels |
+| IFS, Open-Meteo archive | `OpenMeteoSource("ecmwf_ifs025")` | from January 2024 | available pressure levels, 3-hourly |
 | Any of the above, chained | `SourceChain(a, b, ...)` | union | — |
 
 ```python
@@ -22,6 +24,13 @@ res["u"], res["v"], res["t"], res.flags, res.stats
 
 Start with the [tutorial](tutorials/getting-started.md), or jump to a
 [how-to guide](howto/index.md).
+
+For surface weather, `SurfaceEnricher` accepts time, latitude and longitude
+without altitude. `OpenMeteoSurfaceSource` reads archived 10 m wind, gusts,
+precipitation and 2 m temperature; `AromeSurfaceSource` retains the initialization
+and lead time of an explicit AROME forecast run. Stitched archives do not
+retain that provenance. Period totals and maxima keep their native intervals
+rather than being linearly interpolated in time.
 
 ## Why another tool
 

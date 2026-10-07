@@ -34,7 +34,7 @@ from collections import OrderedDict
 from collections.abc import Callable, Sequence
 from concurrent.futures import Executor
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 
 import httpx
 import numpy as np
@@ -121,7 +121,7 @@ class ArchiveCatalog:
         lat_min, lon_min, lat_max, lon_max = (float(x) for x in bbox.groups())
         self.bbox = (lat_min, lon_min, lat_max, lon_max)
         self.levels_by_variable = self._levels(variables)
-        self.first_chunk: int | None = None
+        self._first_chunks: dict[tuple[str, int], int] = {}
 
     @property
     def chunk_hours(self) -> float:
@@ -159,7 +159,8 @@ class ArchiveCatalog:
 
     def _levels(self, variables: Sequence[str]) -> dict[str, set[int]]:
         found: dict[str, set[int]] = {v: set() for v in variables}
-        for name in self._children(f"data/{self.model}/", dirs=True):
+        self.available_variables = frozenset(self._children(f"data/{self.model}/", dirs=True))
+        for name in self.available_variables:
             m = _LEVEL.match(name)
             if m and m["var"] in found:
                 found[m["var"]].add(int(m["hpa"]))
@@ -177,17 +178,20 @@ class ArchiveCatalog:
 
     def locate_first_chunk(self, variable: str, hpa: int) -> int:
         """Index of the oldest archived time chunk."""
-        if self.first_chunk is None:
-            names = self._children(f"data/{self.model}/{variable}_{hpa}hPa/", dirs=False)
+        key = (variable, hpa)
+        if key not in self._first_chunks:
+            folder = f"{variable}_{hpa}hPa" if hpa else variable
+            names = self._children(f"data/{self.model}/{folder}/", dirs=False)
             chunks = [int(m[1]) for n in names if (m := _CHUNK.match(n))]
             if not chunks:
                 raise ValueError(f"{self.model}: no archived chunks")
-            self.first_chunk = min(chunks)
-        return self.first_chunk
+            self._first_chunks[key] = min(chunks)
+        return self._first_chunks[key]
 
     def path(self, variable: str, hpa: int, chunk: int) -> str:
         """Relative path of one archive file."""
-        return f"data/{self.model}/{variable}_{hpa}hPa/chunk_{chunk}.om"
+        folder = f"{variable}_{hpa}hPa" if hpa else variable
+        return f"data/{self.model}/{folder}/chunk_{chunk}.om"
 
 
 # -- reading tiles ---------------------------------------------------------------------------
@@ -380,58 +384,17 @@ def gather_tiles(
 
 
 # -- the source ------------------------------------------------------------------------------
-class OpenMeteoSource:
-    """Isobaric fields of one Open-Meteo archived model.
+class _ArchiveSource:
+    """Shared native archive timing, tile lifecycle and persistent cache."""
 
-    This is a stitched forecast archive, not an ERA5-like reanalysis. Original
-    run identities and forecast lead times are not retained (``CubeKey.run``
-    and ``CubeKey.lead`` are ``None``). ``ecmwf_ifs025`` provides 3-hourly data;
-    the enricher interpolates linearly between native valid times.
+    source_id: str
+    catalog: ArchiveCatalog
+    reader: TileReader
+    _probe: tuple[str, int]
+    _stats: TransferStats
+    time_step: np.timedelta64
 
-    Parameters
-    ----------
-    model:
-        Open-Meteo model folder, e.g. ``"meteofrance_arpege_europe"`` (0.1 deg,
-        from 2023-12-01) or ``"meteofrance_arpege_world025"`` (0.25 deg, from
-        2023-12-22).
-    fields:
-        Output name -> key of :data:`OPENMETEO_VARIABLES` (default u, v, t).
-    levels:
-        Isobaric levels (hPa) allowed; default: all archived levels.
-    base_url:
-        The public bucket, or a local mirror directory with the same layout.
-    tile_deg:
-        Size of the geographic tiles read and cached (degrees).
-    cache_mb:
-        Memory budget of the tile LRU.
-    """
-
-    def __init__(  # noqa: PLR0913 - keyword-only configuration of a public source
-        self,
-        model: str = "meteofrance_arpege_europe",
-        *,
-        fields: dict[str, str] | None = None,
-        levels: Sequence[int] | None = None,
-        base_url: str = OPENMETEO_BASE_URL,
-        tile_deg: float = 5.0,
-        cache_mb: float = 1024.0,
-    ) -> None:
-        self.model = model
-        self.fields = dict(fields or {"u": "u", "v": "v", "t": "t"})
-        unknown = set(self.fields.values()) - set(OPENMETEO_VARIABLES)
-        if unknown:
-            raise ValueError(f"unknown variables {sorted(unknown)}")
-        self.source_id = f"openmeteo-{model}"
-        self._stats = TransferStats()
-        variables = [OPENMETEO_VARIABLES[name][0] for name in self.fields.values()]
-        self.catalog = ArchiveCatalog(base_url, model, variables, self._stats)
-        self.time_step = self.catalog.time_step
-        self.levels = self.catalog.common_levels(levels)
-        self.reader = TileReader(self.catalog, self._stats, tile_deg, cache_mb)
-        self.reader.final = self._final_path
-        self._probe = (variables[0], self.levels[-1])  # a file that always exists
-
-    def __enter__(self) -> OpenMeteoSource:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *exc: object) -> None:
@@ -462,6 +425,7 @@ class OpenMeteoSource:
             lat_step=tp * dlat,
             lon0=float(lon[0]) - dlon / 2,
             lon_step=tp * dlon,
+            merge_adjacent=getattr(self, "merge_adjacent_tiles", True),
         )
 
     def use_cache(self, cache: RangeCache) -> None:
@@ -485,6 +449,64 @@ class OpenMeteoSource:
         """Native valid times bracketing ``t0`` (no run: the archive keeps the latest run only)."""
         h = np.datetime64(self.catalog.time_index(t0) * self.catalog.step_seconds, "s")
         return CubeKey(h), CubeKey(h + self.time_step)
+
+
+class OpenMeteoSource(_ArchiveSource):
+    """Isobaric fields of one Open-Meteo archived model.
+
+    This is a stitched forecast archive, not an ERA5-like reanalysis. Original
+    run identities and forecast lead times are not retained (``CubeKey.run``
+    and ``CubeKey.lead`` are ``None``). ``ecmwf_ifs025`` provides 3-hourly data;
+    the enricher interpolates linearly between native valid times.
+
+    Parameters
+    ----------
+    model:
+        Open-Meteo model folder, e.g. ``"meteofrance_arpege_europe"`` (0.1 deg,
+        from 2023-12-01) or ``"meteofrance_arpege_world025"`` (0.25 deg, from
+        2023-12-22).
+    fields:
+        Output name -> key of :data:`OPENMETEO_VARIABLES` (default u, v, t).
+    levels:
+        Isobaric levels (hPa) allowed; default: all archived levels.
+    base_url:
+        The public bucket, or a local mirror directory with the same layout.
+    tile_deg:
+        Size of the geographic tiles read and cached (degrees).
+    cache_mb:
+        Memory budget of the tile LRU.
+    merge_adjacent_tiles:
+        Group touching tiles into one request (default True). Set False for
+        sparse trajectories on fine grids: each occupied tile gets its own
+        domain and pressure range, with the enricher's interpolation margin.
+    """
+
+    def __init__(  # noqa: PLR0913 - keyword-only configuration of a public source
+        self,
+        model: str = "meteofrance_arpege_europe",
+        *,
+        fields: dict[str, str] | None = None,
+        levels: Sequence[int] | None = None,
+        base_url: str = OPENMETEO_BASE_URL,
+        tile_deg: float = 5.0,
+        cache_mb: float = 1024.0,
+        merge_adjacent_tiles: bool = True,
+    ) -> None:
+        self.model = model
+        self.merge_adjacent_tiles = merge_adjacent_tiles
+        self.fields = dict(fields or {"u": "u", "v": "v", "t": "t"})
+        unknown = set(self.fields.values()) - set(OPENMETEO_VARIABLES)
+        if unknown:
+            raise ValueError(f"unknown variables {sorted(unknown)}")
+        self.source_id = f"openmeteo-{model}"
+        self._stats = TransferStats()
+        variables = [OPENMETEO_VARIABLES[name][0] for name in self.fields.values()]
+        self.catalog = ArchiveCatalog(base_url, model, variables, self._stats)
+        self.time_step = self.catalog.time_step
+        self.levels = self.catalog.common_levels(levels)
+        self.reader = TileReader(self.catalog, self._stats, tile_deg, cache_mb)
+        self.reader.final = self._final_path
+        self._probe = (variables[0], self.levels[-1])  # a file that always exists
 
     def fetch(
         self,

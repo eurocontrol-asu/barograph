@@ -47,6 +47,9 @@ nav:
     - howto/index.md
     - ERA5 (model or pressure levels): howto/era5.md
     - ARPEGE, live and archive: howto/arpege.md
+    - AROME pressure-level archive: howto/arome-pressure.md
+    - Surface weather: howto/surface-weather.md
+    - AROME forecast runs: howto/arome-runs.md
     - FastMeteo-compatible façade: howto/fastmeteo.md
     - Campaigns, cache and parallelism: howto/campaigns.md
   - Reference:

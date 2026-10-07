@@ -43,6 +43,9 @@ __all__ = [
     "parse_header",
 ]
 
+_STATISTICAL_TEMPLATE = 8
+_STATISTICAL_SECTION_MIN = 58
+_INDEX_VERSION = 2
 _PREFIX = 512
 _WINDOW = 256 << 10  # first window scanned for a message start; doubled until found
 _MAX_MESSAGE = 1 << 30
@@ -68,6 +71,8 @@ class GribMessage:
     grid_template: int
     packing: int
     npoints: int
+    start_step_h: float | None = None
+    statistical_process: int | None = None
 
     @property
     def param(self) -> tuple[int, int, int]:
@@ -101,6 +106,13 @@ def _product_section(sec: bytes, info: dict[str, Any]) -> None:
     info["category"], info["number"] = sec[9], sec[10]
     unit = sec[17]
     info["step_h"] = struct.unpack(">i", sec[18:22])[0] * _TIME_UNITS_H.get(unit, np.nan)
+    if info["template4"] == _STATISTICAL_TEMPLATE:
+        if len(sec) < _STATISTICAL_SECTION_MIN or sec[41] != 1:
+            raise GribFormatError("only single-range statistical template 4.8 is supported")
+        duration = struct.unpack(">I", sec[49:53])[0] * _TIME_UNITS_H.get(sec[48], np.nan)
+        info["start_step_h"] = info["step_h"]
+        info["step_h"] += duration
+        info["statistical_process"] = sec[46]
     info["level_type"] = sec[22]
     scale = _signed(sec[23:24])
     value = _signed(sec[24:28])
@@ -167,6 +179,8 @@ def parse_header(prefix: bytes, offset: int) -> GribMessage:
         grid_template=info["grid_template"],
         packing=info["packing"],
         npoints=info["npoints"],
+        start_step_h=info.get("start_step_h"),
+        statistical_process=info.get("statistical_process"),
     )
 
 
@@ -236,13 +250,20 @@ class GribIndex:
     def to_json(self) -> str:
         """Serialise the index."""
         return json.dumps(
-            {"key": self.key, "size": self.size, "messages": [asdict(m) for m in self.messages]}
+            {
+                "version": _INDEX_VERSION,
+                "key": self.key,
+                "size": self.size,
+                "messages": [asdict(m) for m in self.messages],
+            }
         )
 
     @classmethod
     def from_json(cls, text: str) -> GribIndex:
         """Rebuild an index serialised by :meth:`to_json`."""
         d = json.loads(text)
+        if d.get("version") != _INDEX_VERSION:
+            raise ValueError("obsolete GRIB index version")
         return cls(d["key"], d["size"], [GribMessage(**m) for m in d["messages"]])
 
     def save(self, path: Path) -> None:

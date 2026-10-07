@@ -71,3 +71,38 @@ def test_whole_globe_on_a_regional_grid_is_the_whole_grid() -> None:
 def test_regional_box_inside_the_grid_is_unchanged() -> None:
     grid = GridIndex.locate(Domain(40, 50, -5.0, 10.0), ARPEGE_LAT, ARPEGE_LON)
     assert grid.lon[0] == pytest.approx(355.0) and grid.lon[-1] == pytest.approx(370.0)
+
+
+@pytest.mark.parametrize(
+    ("lat_min", "lat_max", "expected"),
+    [
+        (55.0, 56.0, [50.0, 49.5]),
+        (34.0, 35.0, [40.5, 40.0]),
+        (49.0, 56.0, [50.0, 49.5, 49.0]),
+        (34.0, 41.0, [41.0, 40.5, 40.0]),
+    ],
+)
+def test_regional_latitude_clipping(lat_min: float, lat_max: float, expected: list[float]) -> None:
+    lat = np.arange(50.0, 39.9, -0.5)
+    lon = np.arange(-5.0, 10.1, 0.5)
+    grid = GridIndex.locate(Domain(lat_min, lat_max, 1.0, 2.0), lat, lon)
+    np.testing.assert_array_equal(grid.lat, expected)
+    assert 0 <= grid.rows.start < grid.rows.stop <= len(lat)
+
+
+@pytest.mark.parametrize("longitude", [-5.0, 2.0, 10.0])
+def test_exact_regional_longitude_keeps_its_neighbours(longitude: float) -> None:
+    lat = np.arange(50.0, 39.9, -0.5)
+    lon = np.arange(-5.0, 10.1, 0.5)
+    grid = GridIndex.locate(Domain(45.0, 45.0, longitude, longitude), lat, lon)
+    assert len(grid.lon) == 2
+    assert grid.lon[0] <= longitude <= grid.lon[-1]
+    np.testing.assert_array_equal(lon[grid.cols], grid.lon)
+
+
+def test_exact_regional_longitude_with_equivalent_negative_framing() -> None:
+    lat = np.arange(50.0, 39.9, -0.5)
+    lon = np.arange(348.0, 370.1, 0.5)
+    grid = GridIndex.locate(Domain(45.0, 45.0, -5.0, -5.0), lat, lon)
+    np.testing.assert_array_equal(grid.lon, [355.0, 355.5])
+    np.testing.assert_array_equal(lon[grid.cols], grid.lon)

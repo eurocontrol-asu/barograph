@@ -13,6 +13,10 @@ the second is for writing a source of one's own or working on cubes directly.
         - arco_pressure_levels
         - ArpegeSource
         - OpenMeteoSource
+        - OpenMeteoSurfaceSource
+        - AromeSurfaceSource
+        - SurfaceEnricher
+        - SurfaceResult
         - SourceChain
         - Domain
         - Flag
@@ -30,6 +34,9 @@ the second is for writing a source of one's own or working on cubes directly.
       show_submodules: false
       members:
         - Source
+        - SurfaceSource
+        - SurfaceCube
+        - SurfaceVariable
         - CubeKey
         - Cube
         - GridSource
