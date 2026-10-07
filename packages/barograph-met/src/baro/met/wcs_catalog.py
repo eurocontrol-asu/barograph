@@ -43,6 +43,16 @@ def _spatial(lower: float, upper: float, step: float) -> NDArray[np.float64]:
     return np.linspace(lower, upper, round(count) + 1)
 
 
+def _vector(vector: Element) -> tuple[list[str], NDArray[np.float64]]:
+    labels = vector.attrib.get("axisLabels", "").split()
+    values = _numbers(vector.text)
+    # Live Météo-France ground products retain an empty height coordinate slot
+    # in their numeric vectors while advertising a three-dimensional CRS.
+    if labels == ["long", "lat", "time"] and len(values) == 4 and values[2] == 0:  # noqa: PLR2004
+        values = np.delete(values, 2)
+    return labels, values
+
+
 def _axes(root: Element) -> dict[str, tuple[Element, NDArray[np.float64]]]:
     result: dict[str, tuple[Element, NDArray[np.float64]]] = {}
     for axis in root.iterfind(".//{*}GeneralGridAxis"):
@@ -50,9 +60,8 @@ def _axes(root: Element) -> dict[str, tuple[Element, NDArray[np.float64]]]:
         if name not in {"long", "lat", "time", "height"} or name in result:
             raise ValueError(f"Unsupported or repeated WCS axis {name!r}")
         vector = _one(axis, "offsetVector")
-        labels = vector.attrib.get("axisLabels", "").split()
+        labels, values = _vector(vector)
         units = vector.attrib.get("uomLabels", "").split()
-        values = _numbers(vector.text)
         if len(set(labels)) != len(labels) or set(labels) not in (
             {"long", "lat", "time"},
             {"long", "lat", "height", "time"},
@@ -109,7 +118,10 @@ _FIELD_NAMES = {
         "WIND_SPEED_GUST_15MIN__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND",
         "WIND_SPEED_GUST__SPECIFIC_HEIGHT_LEVEL_ABOVE_GROUND",
     ),
-    "precipitation": ("TOTAL_PRECIPITATION__GROUND_OR_WATER_SURFACE",),
+    "precipitation": (
+        "TOTAL_PRECIPITATION__GROUND_OR_WATER_SURFACE",
+        "TOTAL_PRECIPITATION_RATE__GROUND_OR_WATER_SURFACE",
+    ),
     "rain": ("TOTAL_WATER_PRECIPITATION__GROUND_OR_WATER_SURFACE",),
 }
 

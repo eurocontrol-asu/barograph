@@ -81,3 +81,23 @@ def test_coverage_selection_preserves_semantics_run_and_interval() -> None:
     assert select_coverage(ids, "precipitation", run, 900, rain) == rain
     with pytest.raises(ValueError):
         select_coverage(ids, "precipitation", run, 900, "absent")
+
+
+def test_live_ground_vector_empty_height_slot() -> None:
+    # The ground CRS advertises long/lat/time, but real vectors retain a zero
+    # height slot. Only this exact server representation is accepted.
+    xml = description(False).replace("0.025 0 0<", "0.025 0 0 0<")
+    xml = xml.replace("0 0.025 0<", "0 0.025 0 0<").replace("0 0 1<", "0 0 0 1<")
+    grid = parse_description(fromstring(xml))  # noqa: S314 - local fixture
+    assert grid.lead_seconds == (300, 600, 900)
+    assert grid.heights == ()
+    with pytest.raises(ValueError):
+        parse_description(fromstring(xml.replace("0 0 0 1<", "0 0 2 1<")))  # noqa: S314
+
+
+def test_piaf_named_rate_is_available_as_native_accumulation() -> None:
+    run = np.datetime64("2026-10-07T13:55")
+    cid = "TOTAL_PRECIPITATION_RATE__GROUND_OR_WATER_SURFACE___2026-10-07T13.55.00Z_PT5M"
+    assert select_coverage((cid,), "precipitation", run, 300) == cid
+    with pytest.raises(ValueError):
+        select_coverage((cid,), "precipitation", run, 900)
