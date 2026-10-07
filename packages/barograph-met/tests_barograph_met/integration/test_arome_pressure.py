@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -10,7 +12,7 @@ import pytest
 import synthetic
 from baro.met import Enricher, Flag
 from baro.met.base import CubeKey
-from baro.met.domain import Domain
+from baro.met.domain import Cube, Domain
 from baro.met.openmeteo import OpenMeteoSource
 
 pytestmark = pytest.mark.integration
@@ -126,3 +128,48 @@ def test_missing_chunk_is_unavailable(arome_mirror: Path) -> None:
     with OpenMeteoSource(MODEL, base_url=str(arome_mirror)) as src:
         result = Enricher(src, level_margin=0).enrich([start], [45.0], [2.0], pressure_pa=[26000.0])
         assert result.flags[0] == Flag.MISSING_DATA
+
+
+def test_per_tile_requests_bound_domains_and_levels_without_changing_values(
+    arome_mirror: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    latitude = np.linspace(42.0, 48.0, 120)
+    longitude = np.linspace(-3.0, 8.0, 120)
+    pressure = np.linspace(22000.0, 85000.0, 120)
+    records: dict[bool, list[tuple[Domain, int]]] = {}
+    results = {}
+    for merge in (True, False):
+        with OpenMeteoSource(
+            MODEL, base_url=str(arome_mirror), tile_deg=1.0, merge_adjacent_tiles=merge
+        ) as source:
+            start, _ = source.coverage()
+            time = start + np.timedelta64(107, "h") + np.arange(120).astype("timedelta64[m]")
+            original = source.fetch
+            records[merge] = []
+
+            def fetch(
+                key: CubeKey,
+                domain: Domain,
+                p_range: tuple[float, float],
+                *,
+                _fetch: Callable[..., Cube] = original,
+                _record: list[tuple[Domain, int]] = records[merge],
+                **kwargs: Any,
+            ) -> Cube:
+                cube = _fetch(key, domain, p_range, **kwargs)
+                _record.append((domain, len(cube.vertical.ids)))
+                return cube
+
+            monkeypatch.setattr(source, "fetch", fetch)
+            results[merge] = Enricher(source, margin_deg=0.1, level_margin=0).enrich(
+                time, latitude, longitude, pressure_pa=pressure
+            )
+    np.testing.assert_array_equal(results[False].flags, results[True].flags)
+    assert results[False].valid.all()
+    for name in ("u", "v", "t"):
+        np.testing.assert_allclose(results[False][name], results[True][name], atol=1e-12)
+    assert all(
+        domain.lat_max - domain.lat_min <= 1.2 and domain.lon_max - domain.lon_min <= 1.2
+        for domain, _ in records[False]
+    )
+    assert max(levels for _, levels in records[False]) < max(levels for _, levels in records[True])

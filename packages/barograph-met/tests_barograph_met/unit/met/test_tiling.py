@@ -46,3 +46,18 @@ def test_steps_must_be_positive() -> None:
     with pytest.raises(ValueError, match="positive"):
         Tiling(lat0=0.0, lat_step=0.0)
     assert SQUARES.n_cols == 72 and BANDS.n_cols == 1
+
+
+def test_unmerged_tiles_keep_ownership_despite_overlapping_margins() -> None:
+    from dataclasses import replace
+
+    tiles = replace(SQUARES, merge_adjacent=False)
+    assert _labels([25.0, 35.0], [0.0, 0.0], tiles, margin=10.0) == [0, 1]
+    assert _labels([45.0, 45.0, 45.0], [4.9, 5.1, 4.8], tiles, margin=0.5) == [0, 1, 0]
+
+
+def test_unmerged_dateline_tiles_and_equivalent_longitudes() -> None:
+    from dataclasses import replace
+
+    tiles = replace(SQUARES, merge_adjacent=False)
+    assert _labels([10.0] * 4, [179.9, -179.9, 180.1, -180.1], tiles) == [1, 0, 0, 1]

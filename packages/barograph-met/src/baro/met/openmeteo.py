@@ -425,6 +425,7 @@ class _ArchiveSource:
             lat_step=tp * dlat,
             lon0=float(lon[0]) - dlon / 2,
             lon_step=tp * dlon,
+            merge_adjacent=getattr(self, "merge_adjacent_tiles", True),
         )
 
     def use_cache(self, cache: RangeCache) -> None:
@@ -474,6 +475,10 @@ class OpenMeteoSource(_ArchiveSource):
         Size of the geographic tiles read and cached (degrees).
     cache_mb:
         Memory budget of the tile LRU.
+    merge_adjacent_tiles:
+        Group touching tiles into one request (default True). Set False for
+        sparse trajectories on fine grids: each occupied tile gets its own
+        domain and pressure range, with the enricher's interpolation margin.
     """
 
     def __init__(  # noqa: PLR0913 - keyword-only configuration of a public source
@@ -485,8 +490,10 @@ class OpenMeteoSource(_ArchiveSource):
         base_url: str = OPENMETEO_BASE_URL,
         tile_deg: float = 5.0,
         cache_mb: float = 1024.0,
+        merge_adjacent_tiles: bool = True,
     ) -> None:
         self.model = model
+        self.merge_adjacent_tiles = merge_adjacent_tiles
         self.fields = dict(fields or {"u": "u", "v": "v", "t": "t"})
         unknown = set(self.fields.values()) - set(OPENMETEO_VARIABLES)
         if unknown:

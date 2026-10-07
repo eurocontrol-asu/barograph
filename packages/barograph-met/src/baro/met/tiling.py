@@ -23,12 +23,15 @@ class Tiling:
     """Regular tiling of a grid: tile ``(i, j)`` starts at ``lat0 + i * lat_step``.
 
     ``lon_step=None`` means tiles span every longitude (ARCO-ERA5 bands).
+    ``merge_adjacent=False`` groups points by their own tile, keeping long
+    connected trajectories from requesting large mostly empty rectangles.
     """
 
     lat0: float
     lat_step: float
     lon0: float = -180.0
     lon_step: float | None = None
+    merge_adjacent: bool = True
 
     def __post_init__(self) -> None:
         if self.lat_step <= 0 or (self.lon_step is not None and self.lon_step <= 0):
@@ -51,9 +54,18 @@ def partition(
     Components are ordered by their first tile (south to north, then west to
     east); a point near a tile edge marks both tiles, so the neighbours its
     interpolation needs are always in its own component.
+    With ``merge_adjacent=False``, labels instead identify each point's own
+    tile. The caller must retain its normal domain margin and grid neighbours
+    when fetching each group.
     """
     if tiling is None or lat.size == 0:
         return np.zeros(lat.size, dtype=np.int64)
+    if not tiling.merge_adjacent:
+        # The caller still expands each group's domain by its requested margin.
+        # Assigning only the point's own tile avoids merging overlapping halos.
+        cells = _tile_ranges(lat, lon, 0.0, tiling)[:, [0, 2]]
+        _, labels = np.unique(cells, axis=0, return_inverse=True)
+        return np.asarray(labels, dtype=np.int64)
     rects, inverse = np.unique(_tile_ranges(lat, lon, margin, tiling), axis=0, return_inverse=True)
     sets = _UnionFind()
     ncols = tiling.n_cols

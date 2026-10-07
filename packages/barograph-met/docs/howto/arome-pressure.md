@@ -7,7 +7,11 @@ hourly AROME wind components and temperature along a trajectory:
 from baro.met import Enricher
 from baro.met.openmeteo import OpenMeteoSource
 
-with OpenMeteoSource("meteofrance_arome_france0025", tile_deg=0.25) as source:
+with OpenMeteoSource(
+    "meteofrance_arome_france0025",
+    tile_deg=0.25,
+    merge_adjacent_tiles=False,
+) as source:
     result = Enricher(
         source,
         cache_dir="weather-cache",
@@ -22,6 +26,14 @@ arrays of equal length; altitude is barometric altitude in feet. Output wind
 is in m/s and temperature in kelvin. Each point uses horizontal, pressure
 and time interpolation. Missing or outside points have flags and NaN values.
 Pressure levels alone do not supply terrain or actual surface pressure.
+
+`merge_adjacent_tiles=False` groups points by their own native tile, with
+the requested margin and pressure range applied separately to each group.
+This bounds the size of each request even when a long trajectory occupies
+a continuous corridor. The default `True` joins touching tiles, which can
+fill a large rectangular area around a narrow route. The tile memory budget
+limits retained cache entries, not the temporary arrays of a fetch: each
+tile decodes all samples of its native time chunk.
 
 The archive is a stitched forecast series: the latest available runs are
 combined at each valid time, without retained run identity or forecast lead.
@@ -51,7 +63,8 @@ accuracy against independent observations.
 Three tile sizes were tested on identical points with independent initially
 empty disk caches, a 256 MB tile memory budget, 0.025° geographic margin,
 zero extra pressure levels, four I/O workers and one prefetched cube.
-Timings below cover enrichment; initial metadata discovery is excluded.
+Timings below cover enrichment with the default touching-tile grouping;
+initial metadata discovery is excluded.
 
 | Tile edge | Cold time | Download | Requests | Warm time | Warm download |
 |---|---:|---:|---:|---:|---:|
@@ -69,5 +82,30 @@ the generic defaults are unchanged.
 
 Local regression tests cover the 108-hour chunk boundary, selective pressure
 levels, reuse, missing selected/unselected chunks, common-level intersection
-and regional latitude clipping. They use synthetic mirrors without network
+and regional latitude clipping. Per-tile grouping also reproduces the legacy
+interpolated values while bounding geographic and vertical requests; unit
+tests cover overlapping margins and equivalent longitudes at the dateline.
+They use synthetic mirrors without network
 access or private trajectory files.
+
+## Full-trajectory request size
+
+A 7 294-point trajectory exposed a limitation of connected-tile grouping.
+One hourly request covered a clipped 298 × 546 grid rectangle and 12 pressure
+levels, including 1 705 tiles while only 82 tiles contained nearest trajectory
+points. Decoding three variables across all 108 native timestamps required
+about 2.65 GB of temporary tile arrays for a 23.43 MB single-time cube. The
+run was stopped after its process reached about 4.7 GB RSS. This was not a
+completed timing comparison.
+
+With `merge_adjacent_tiles=False`, the complete trajectory returned in
+78.72 s with 346.49 MiB peak process RSS and 222 small cubes (0.43 MB summed
+cube arrays). It reused disk pages from the interrupted run: 37.58 MB of
+additional network transfer and 179.29 MB of disk cache hits. These are warm
+disk-cache measurements, not cold costs. All 5 278 valid points had finite
+u/v/t; 1 821 points beyond the metadata grid were flagged `OUTSIDE_DOMAIN`,
+two at 325 ft were `BELOW_BOTTOM`, and 193 along the northern edge of the
+metadata grid were `MISSING_DATA`. The earlier narrow sample reproduced the
+same flags and values within 4e-13. Per-tile grouping avoids filling the
+empty rectangular area around a connected flight corridor and selects
+pressure levels for each local group.
