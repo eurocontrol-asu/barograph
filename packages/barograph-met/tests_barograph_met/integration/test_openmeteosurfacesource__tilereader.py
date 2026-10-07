@@ -169,3 +169,20 @@ def test_surface_and_pressure_folder_names_do_not_collide(tmp_path: Path) -> Non
         )
         assert surface.catalog.path("temperature_2m", 0, 0).endswith("temperature_2m/chunk_0.om")
         assert surface.enrich(EPOCH, 45, 2).valid[0]
+
+
+@pytest.mark.live
+def test_live_arome_surface_fields() -> None:
+    """Explicit opt-in smoke test against the public surface archive."""
+    with OpenMeteoSurfaceSource() as source:
+        times = np.array(["2026-04-15T14:00", "2026-04-15T14:30"], dtype="datetime64[ns]")
+        result = source.enrich(times, 48.8566, 2.3522)
+        assert result.valid.all()
+        assert all(np.isfinite(a).all() for a in result.fields.values())
+        assert np.isnat(result.run).all() and np.isnat(result.lead).all()
+        assert source.enrich(times, 48.8566, 2.3522).stats["bytes"] == 0
+        assert source.reader.tile_deg == 0.25
+        np.testing.assert_array_equal(
+            result.interval_end["rain"],
+            np.array(["2026-04-15T14", "2026-04-15T15"], dtype="datetime64[ns]"),
+        )

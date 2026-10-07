@@ -65,7 +65,10 @@ class OpenMeteoSurfaceSource(_ArchiveSource):
     base_url:
         Public bucket or local mirror. Archive forecasts extend to metadata coverage.
     tile_deg:
-        Geographic tile edge in degrees (same caching mechanism as pressure fields).
+        Geographic tile edge in degrees (default 0.25 for sparse surface queries).
+    merge_adjacent_tiles:
+        Merge touching occupied tiles into one request (default False, preserving
+        sparse point reads). Tile caches still reuse neighbouring interpolation cells.
     cache_mb:
         Tile LRU memory budget in megabytes.
 
@@ -79,16 +82,18 @@ class OpenMeteoSurfaceSource(_ArchiveSource):
     Run/lead times are unavailable for this stitched archive.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - keyword-only archive configuration
         self,
         model: str = "meteofrance_arome_france0025",
         *,
         fields: dict[str, str] | None = None,
         base_url: str = OPENMETEO_BASE_URL,
-        tile_deg: float = 5.0,
+        tile_deg: float = 0.25,
+        merge_adjacent_tiles: bool = False,
         cache_mb: float = 1024.0,
     ) -> None:
         self.model = model
+        self.merge_adjacent_tiles = merge_adjacent_tiles
         self.fields = dict(fields if fields is not None else {n: n for n in _DEFAULT_FIELDS})
         if not self.fields:
             raise ValueError("at least one surface field is required")
