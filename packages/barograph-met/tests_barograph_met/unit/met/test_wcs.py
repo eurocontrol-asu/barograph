@@ -202,7 +202,30 @@ def test_retry_after_long_does_not_retry_early(monkeypatch: pytest.MonkeyPatch) 
 def test_retry_after_date_or_fallback(
     header: str, delay: float, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from baro.met.wcs import _retry_delay
-
+    delays: list[float] = []
     monkeypatch.setattr("baro.met.wcs.time.time", lambda: 1791374400.0)
-    assert _retry_delay(header, 0) == delay
+    monkeypatch.setattr("baro.met.wcs.time.sleep", delays.append)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if not delays:
+            return httpx.Response(503, headers={"Retry-After": header})
+        return httpx.Response(200, content=GRIB)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        source = WCSClient(ENDPOINT, "secret", client=client)
+        assert source.coverage(COVERAGE, subsets=[]) == GRIB
+        assert source.stats.requests == 2
+        assert source.stats.throttled == 1
+    assert delays == [delay]
+
+
+def test_coverage_validation_once_per_call(tmp_path: Path) -> None:
+    validated: list[bytes] = []
+    with httpx.Client(
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, content=GRIB))
+    ) as client:
+        source = WCSClient(ENDPOINT, "secret", client=client, cache=RangeCache(tmp_path))
+        for count in (1, 2):
+            assert source.coverage(COVERAGE, subsets=[], validate=validated.append) == GRIB
+            assert validated == [GRIB] * count
+        assert source.stats.requests == 1
