@@ -82,6 +82,7 @@ class AromeSurfaceSource:
         self.variables = {out: _VARIABLES[name] for out, name in self.fields.items()}
         self.source_id = "arome-0025-surface"
         self._forecast.source_id = self.source_id
+        self._reader = _NativeFields(self._forecast, self.run, self.file_key)
         if index_dir is not None:
             self.indexes.directory = Path(index_dir).expanduser() / self.source_id
 
@@ -150,50 +151,6 @@ class AromeSurfaceSource:
                 return f"{stamp}/arome/0025/SP1/{name}"
         raise DataUnavailableError(f"AROME lead {lead_h} h outside 0..51")
 
-    def _index(self, key: str) -> GribIndex:
-        """Translate a missing forecast package to the source availability contract."""
-        try:
-            return self.indexes.get(key)
-        except MissingChunkError as exc:
-            raise DataUnavailableError(f"{key}: forecast file not published") from exc
-
-    def _message(self, key: str, name: str, lead: int, *, cumulative: bool = False) -> GribMessage:
-        """Select a unique native message, including its statistical meaning."""
-        param, level_type, level = _PARAMS[name]
-        candidates = [
-            m
-            for m in self._index(key).messages
-            if (m.param, m.level_type, m.level, m.step_h) == (param, level_type, level, lead)
-            if m.statistical_process == {"gusts": _MAXIMUM}.get(name, m.statistical_process)
-        ]
-        if cumulative:
-            candidates = [
-                m for m in candidates if (m.start_step_h, m.statistical_process) == (0, 1)
-            ]
-        if len(candidates) != 1:
-            raise DataUnavailableError(f"{key}: missing or ambiguous {name} at lead {lead}")
-        return candidates[0]
-
-    def _decode(self, key: str, message: GribMessage) -> DecodedField:
-        """Read one immutable message through the shared byte cache."""
-        return decode_message(fetch_messages(self._forecast._messages, key, [message], None)[0])
-
-    def _field(self, name: str, lead: int) -> DecodedField:
-        """Read a native field and normalize its supported interval semantics."""
-        key = self.file_key(self.run, lead)
-        message = self._message(key, name, lead)
-        if name == "gusts" and message.start_step_h != lead - 1:
-            raise DataUnavailableError("gust does not describe the preceding hour")
-        decoded = self._decode(key, message)
-        if name == "precipitation":
-            return _hourly_precipitation(decoded, message, lead, self._cumulative)
-        return decoded
-
-    def _cumulative(self, name: str, lead: int) -> DecodedField:
-        """Read the preceding same-run cumulative counter without differencing it."""
-        key = self.file_key(self.run, lead)
-        return self._decode(key, self._message(key, name, lead, cumulative=True))
-
     def fetch(
         self, key: CubeKey, domain: Domain, *, fields: Sequence[str] | None = None
     ) -> SurfaceCube:
@@ -202,7 +159,7 @@ class AromeSurfaceSource:
         selected = self.fields if fields is None else {out: self.fields[out] for out in fields}
         if not selected:
             raise ValueError("at least one surface field is required")
-        arrays = {name: self._field(name, lead) for name in set(selected.values())}
+        arrays = {name: self._reader.field(name, lead) for name in set(selected.values())}
         _, lat, lon = next(iter(arrays.values()))
         for _, field_lat, field_lon in arrays.values():
             _require_same_grid((lat, lon), (field_lat, field_lon))
@@ -284,3 +241,62 @@ def _forecast_lead(key: CubeKey, run: np.datetime64) -> int:
         raise ValueError("valid time must be aligned to an hourly forecast step")
     lead = int(delta)
     return lead
+
+
+class _NativeFields:
+    """Select, cache and decode native GRIB fields and their preceding counters."""
+
+    def __init__(
+        self,
+        forecast: ArpegeSource,
+        run: np.datetime64,
+        file_key: Callable[[np.datetime64, int], str],
+    ) -> None:
+        self._forecast = forecast
+        self.run = run
+        self.indexes = forecast.indexes
+        self._file_key = file_key
+
+    def index(self, key: str) -> GribIndex:
+        """Translate a missing forecast package to the source availability contract."""
+        try:
+            return self.indexes.get(key)
+        except MissingChunkError as exc:
+            raise DataUnavailableError(f"{key}: forecast file not published") from exc
+
+    def message(self, key: str, name: str, lead: int, *, cumulative: bool = False) -> GribMessage:
+        """Select a unique native message, including its statistical meaning."""
+        param, level_type, level = _PARAMS[name]
+        candidates = [
+            m
+            for m in self.index(key).messages
+            if (m.param, m.level_type, m.level, m.step_h) == (param, level_type, level, lead)
+            if m.statistical_process == {"gusts": _MAXIMUM}.get(name, m.statistical_process)
+        ]
+        if cumulative:
+            candidates = [
+                m for m in candidates if (m.start_step_h, m.statistical_process) == (0, 1)
+            ]
+        if len(candidates) != 1:
+            raise DataUnavailableError(f"{key}: missing or ambiguous {name} at lead {lead}")
+        return candidates[0]
+
+    def decode(self, key: str, message: GribMessage) -> DecodedField:
+        """Read one immutable message through the shared byte cache."""
+        return decode_message(fetch_messages(self._forecast._messages, key, [message], None)[0])
+
+    def field(self, name: str, lead: int) -> DecodedField:
+        """Read a native field and normalize its supported interval semantics."""
+        key = self._file_key(self.run, lead)
+        message = self.message(key, name, lead)
+        if name == "gusts" and message.start_step_h != lead - 1:
+            raise DataUnavailableError("gust does not describe the preceding hour")
+        decoded = self.decode(key, message)
+        if name == "precipitation":
+            return _hourly_precipitation(decoded, message, lead, self.cumulative)
+        return decoded
+
+    def cumulative(self, name: str, lead: int) -> DecodedField:
+        """Read the preceding same-run cumulative counter without differencing it."""
+        key = self._file_key(self.run, lead)
+        return self.decode(key, self.message(key, name, lead, cumulative=True))

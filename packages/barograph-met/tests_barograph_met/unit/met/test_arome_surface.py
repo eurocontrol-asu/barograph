@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from baro.met.arome_surface import AromeSurfaceSource, _hourly_precipitation
+from baro.met.arome_surface import AromeSurfaceSource
 from baro.met.base import CubeKey, DataUnavailableError
 from baro.met.domain import Domain
 from baro.met.grib import GribIndex, GribMessage
@@ -40,8 +40,8 @@ def test_hourly_precipitation_subtracts_same_run_counter(monkeypatch: pytest.Mon
         calls.append((name, lead))
         return np.full((2, 2), 6, dtype=np.float32), lat, lon
 
-    monkeypatch.setattr(source, "_cumulative", cumulative)
-    field, _, _ = source._field("precipitation", 7)
+    monkeypatch.setattr(source._reader, "cumulative", cumulative)
+    field, _, _ = source._reader.field("precipitation", 7)
     assert calls == [("precipitation", 6)]
     assert np.all(field == 3)
 
@@ -60,7 +60,7 @@ def test_subset_skips_unavailable_initial_period_and_reverses_latitude(
             np.array([2.0, 3.0]),
         )
 
-    monkeypatch.setattr(source, "_field", get_field)
+    monkeypatch.setattr(source._reader, "field", get_field)
     cube = source.fetch(
         CubeKey(source.run, source.run), Domain.from_points([48.5], [2.5]), fields=["t2m"]
     )
@@ -125,9 +125,11 @@ def test_material_counter_decrease_only_invalidates_affected_cell(
         lambda b: (np.array([[9.0, 1.0], [9.0, 9.0]], dtype=np.float32), lat, lon),
     )
     monkeypatch.setattr(
-        source, "_cumulative", lambda name, lead: (np.full((2, 2), 6, dtype=np.float32), lat, lon)
+        source._reader,
+        "cumulative",
+        lambda name, lead: (np.full((2, 2), 6, dtype=np.float32), lat, lon),
     )
-    field, _, _ = source._field("precipitation", 6)
+    field, _, _ = source._reader.field("precipitation", 6)
     assert field[0, 0] == 3
     assert np.isnan(field[0, 1])
 
@@ -137,16 +139,21 @@ def test_material_counter_decrease_only_invalidates_affected_cell(
     [(5, 1, 6, True), (0, 1, 1, True), (2, 1, 6, False), (0, 2, 6, False)],
 )
 def test_precipitation_interval_validation(
-    start: int, process: int, lead: int, valid: bool
+    start: int, process: int, lead: int, valid: bool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     source = AromeSurfaceSource(run=np.datetime64("2026-10-06T00"))
     message = GribMessage(0, 8, 0, 1, 52, 1, 0, lead, 0, 0, 4, start, process)
     decoded = np.ones((2, 2), dtype=np.float32), np.array([49.0, 48.0]), np.array([2.0, 3.0])
+    monkeypatch.setattr(source._reader, "message", lambda *args: message)
+    monkeypatch.setattr(source._reader, "decode", lambda *args: decoded)
+    key = CubeKey(source.run + np.timedelta64(lead, "h"), source.run)
+    domain = Domain.from_points([48.5], [2.5])
     if valid:
-        assert np.all(_hourly_precipitation(decoded, message, lead, source._cumulative)[0] == 1)
+        cube = source.fetch(key, domain, fields=["precipitation"])
+        assert np.all(cube.fields["precipitation"] == 1)
     else:
         with pytest.raises(DataUnavailableError, match="interval"):
-            _hourly_precipitation(decoded, message, lead, source._cumulative)
+            source.fetch(key, domain, fields=["precipitation"])
 
 
 def test_native_gust_selection_rejects_wrong_statistical_meaning(
@@ -156,6 +163,6 @@ def test_native_gust_selection_rejects_wrong_statistical_meaning(
     mean = GribMessage(0, 8, 0, 2, 22, 103, 10, 6, 0, 0, 4, 5, 0)
     maximum = GribMessage(8, 8, 0, 2, 22, 103, 10, 6, 0, 0, 4, 5, 2)
     monkeypatch.setattr(source.indexes, "get", lambda key: GribIndex(key, 16, [mean, maximum]))
-    assert source._message("package", "gusts", 6) is maximum
+    assert source._reader.message("package", "gusts", 6) is maximum
     with pytest.raises(DataUnavailableError, match="missing or ambiguous"):
-        source._message("package", "gusts", 7)
+        source._reader.message("package", "gusts", 7)
