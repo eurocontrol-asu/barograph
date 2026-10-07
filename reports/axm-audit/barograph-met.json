@@ -1,10 +1,10 @@
 {
-  "score": 97.9,
+  "score": 97.5,
   "grade": "A",
   "passed": [
     "ARCH_CIRCULAR: 0 circular import(s) found",
     "ARCH_GOD_CLASS: 0 god class(es) found",
-    "ARCH_COUPLING: Coupling: 10 module(s) above threshold (-30 pts)",
+    "ARCH_COUPLING: Coupling: 12 module(s) above threshold (-36 pts)",
     "ARCH_DUPLICATION: 0 duplicate block(s) found",
     "QUALITY_COMPLEXITY: Complexity score: 100/100 (0 high-complexity functions)",
     "QUALITY_TESTS: Test coverage: 92% (92/100)",
@@ -21,8 +21,8 @@
     "PRACTICE_BLOCKING_IO: 0 blocking-IO violation(s) found",
     {
       "rule_id": "PRACTICE_DOCSTRING",
-      "message": "Docstring coverage: 91% (159/174)",
-      "text": "     \u2022 baro/met/surface.py: stats, coverage, cube_keys, tiling, use_cache, fetch\n     \u2022 baro/met/arome_surface.py: stats, close, tiling, use_cache, published_runs, coverage, cube_keys, file_key, fetch",
+      "message": "Docstring coverage: 90% (178/198)",
+      "text": "     \u2022 baro/met/wcs.py: fetch\n     \u2022 baro/met/surface.py: stats, coverage, cube_keys, tiling, use_cache, fetch\n     \u2022 baro/met/immediate.py: catalog, metadata, field, validate\n     \u2022 baro/met/arome_surface.py: stats, close, tiling, use_cache, published_runs, coverage, cube_keys, file_key, fetch",
       "fix_hint": "Add docstrings to public functions"
     },
     "PRACTICE_ENV_CREDENTIAL_READ: 0 credential environment read(s) found",
@@ -59,7 +59,7 @@
         "verdicts": []
       }
     },
-    "QUALITY_SECURITY: Security score: 100/100 (0 high, 0 medium severity issues)",
+    "QUALITY_SECURITY: Security score: 95/100 (0 high, 1 medium severity issues)",
     "PRACTICE_SECURITY: 0 potential secret(s) found",
     "STRUCTURE_TESTS_PYRAMID: pyramid layout ok: unit, integration, e2e",
     "STRUCTURE_PYPROJECT: pyproject.toml completeness: 9/9 fields",
