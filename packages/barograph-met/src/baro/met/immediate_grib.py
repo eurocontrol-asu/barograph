@@ -71,7 +71,9 @@ def _semantics(buf: bytes, field: str, run: np.datetime64) -> GribMessage:
     finally:
         eccodes.codes_release(handle)
     param, level_type, level, unit = _PARAMS[field]
-    if msg.param != param or msg.level_type != level_type or msg.level != level:
+    # Surface (type 1) has no numeric coordinate: PIAF encodes it missing.
+    level_matches = msg.level == level or (level_type == 1 and np.isnan(msg.level))
+    if msg.param != param or msg.level_type != level_type or not level_matches:
         raise GribFormatError(f"unexpected parameter or vertical level for {field}")
     if units != unit:
         raise GribFormatError(f"unexpected unit {units!r} for {field}; expected {unit}")

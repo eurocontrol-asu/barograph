@@ -137,3 +137,19 @@ def test_counters_require_same_reference_interval() -> None:
     wrong_previous = decode(message("precipitation"), "precipitation")
     with pytest.raises(GribFormatError, match="incompatible intervals"):
         normalize_precipitation(current, interval_seconds=900, previous=wrong_previous)
+
+
+def test_piaf_surface_without_numeric_coordinate() -> None:
+    # Live PIAF RR5MN is param52 accumulation, despite RATE in its coverage ID.
+    buf = message(
+        "precipitation",
+        start=25,
+        end=30,
+        scaleFactorOfFirstFixedSurface=255,
+        scaledValueOfFirstFixedSurface=2147483647,
+    )
+    result = decode(buf, "precipitation", minutes=30, interval=300)
+    assert result.interval_start == RUN + np.timedelta64(25, "m")
+    np.testing.assert_array_equal(result.values, [[3, 4], [1, 2]])
+    with pytest.raises(GribFormatError, match="vertical level"):
+        decode(message("u10", scaleFactorOfFirstFixedSurface=255))
