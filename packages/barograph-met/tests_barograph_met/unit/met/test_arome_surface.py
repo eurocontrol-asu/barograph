@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from baro.met.arome_surface import AromeSurfaceSource
+from baro.met.arome_surface import AromeSurfaceSource, _hourly_precipitation
 from baro.met.base import CubeKey, DataUnavailableError
 from baro.met.domain import Domain
 from baro.met.grib import GribIndex, GribMessage
@@ -130,3 +130,32 @@ def test_material_counter_decrease_only_invalidates_affected_cell(
     field, _, _ = source._field("precipitation", 6)
     assert field[0, 0] == 3
     assert np.isnan(field[0, 1])
+
+
+@pytest.mark.parametrize(
+    ("start", "process", "lead", "valid"),
+    [(5, 1, 6, True), (0, 1, 1, True), (2, 1, 6, False), (0, 2, 6, False)],
+)
+def test_precipitation_interval_validation(
+    start: int, process: int, lead: int, valid: bool
+) -> None:
+    source = AromeSurfaceSource(run=np.datetime64("2026-10-06T00"))
+    message = GribMessage(0, 8, 0, 1, 52, 1, 0, lead, 0, 0, 4, start, process)
+    decoded = np.ones((2, 2), dtype=np.float32), np.array([49.0, 48.0]), np.array([2.0, 3.0])
+    if valid:
+        assert np.all(_hourly_precipitation(decoded, message, lead, source._cumulative)[0] == 1)
+    else:
+        with pytest.raises(DataUnavailableError, match="interval"):
+            _hourly_precipitation(decoded, message, lead, source._cumulative)
+
+
+def test_native_gust_selection_rejects_wrong_statistical_meaning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = AromeSurfaceSource(run=np.datetime64("2026-10-06T00"))
+    mean = GribMessage(0, 8, 0, 2, 22, 103, 10, 6, 0, 0, 4, 5, 0)
+    maximum = GribMessage(8, 8, 0, 2, 22, 103, 10, 6, 0, 0, 4, 5, 2)
+    monkeypatch.setattr(source.indexes, "get", lambda key: GribIndex(key, 16, [mean, maximum]))
+    assert source._message("package", "gusts", 6) is maximum
+    with pytest.raises(DataUnavailableError, match="missing or ambiguous"):
+        source._message("package", "gusts", 7)
