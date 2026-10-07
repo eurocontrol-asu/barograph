@@ -38,7 +38,7 @@ class CubeKey:
 
     @property
     def lead(self) -> np.timedelta64 | None:
-        """Forecast lead time (``None`` for analyses)."""
+        """Forecast lead time, or ``None`` for analyses and stitched forecast archives."""
         return None if self.run is None else self.valid - self.run
 
     def __str__(self) -> str:

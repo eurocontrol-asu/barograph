@@ -1,13 +1,15 @@
 """Open-Meteo's public model archive on AWS (``s3://openmeteo``) as a source.
 
 Open-Meteo keeps, for many NWP models (Météo-France ARPEGE, ECMWF IFS, DWD
-ICON, NOAA GFS, ...), a continuous hourly series built from the most recent
-run available at each hour (runs are stitched; lead times are not kept). Each
+ICON, NOAA GFS, ...), a continuous series at the model's native time step,
+built from the most recent run available at each valid time (runs are
+stitched; lead times are not kept). Each
 variable and level lives in its own ``.om`` files, one per block of
-``chunk_time_length`` hours (e.g. 210 h). Inside a file the data are chunked as
-``1 latitude row x 14 longitudes x all hours``: reading one hour costs as much
+``chunk_time_length`` time steps (e.g. 104 three-hour steps = 312 h for IFS).
+Inside a file the data are chunked spatially (e.g.
+``1 latitude row x 14 longitudes x all time steps``): reading one step costs as much
 as reading the whole block, so blocks are read per geographic tile and kept in
-an in-memory LRU, and every later hour and flight of the block is free.
+an in-memory LRU, and every later time step and flight of the block is free.
 
 Values are stored as scaled integers (lossy); against Météo-France's own files
 we measured differences of 0.035 m/s (wind) and 0.08 K (temperature) RMS.
@@ -104,10 +106,15 @@ class ArchiveCatalog:
         self.model = model
         self.stats = stats
         meta = json.loads(self._read_text(f"data/{model}/static/meta.json"))
-        self.chunk_hours = int(meta["chunk_time_length"])
-        if int(meta["temporal_resolution_seconds"]) != _HOUR_S:
-            raise ValueError("only hourly archives are supported")
-        self.end = np.datetime64(int(meta["data_end_time"]), "s").astype("datetime64[h]")
+        self.chunk_steps = int(meta["chunk_time_length"])
+        self.step_seconds = int(meta["temporal_resolution_seconds"])
+        if self.chunk_steps <= 0 or self.step_seconds <= 0:
+            raise ValueError("archive chunk length and temporal resolution must be positive")
+        self.time_step = np.timedelta64(self.step_seconds, "s")
+        self.chunk_seconds = self.chunk_steps * self.step_seconds
+        # Open-Meteo's data_end_time is exclusive; Source.coverage() is inclusive.
+        last_index = (int(meta["data_end_time"]) - 1) // self.step_seconds
+        self.end = np.datetime64(last_index * self.step_seconds, "s")
         bbox = _BBOX.search(meta["crs_wkt"])
         if bbox is None:
             raise ValueError("cannot read the grid bounding box from meta.json")
@@ -115,6 +122,15 @@ class ArchiveCatalog:
         self.bbox = (lat_min, lon_min, lat_max, lon_max)
         self.levels_by_variable = self._levels(variables)
         self.first_chunk: int | None = None
+
+    @property
+    def chunk_hours(self) -> float:
+        """Duration of a chunk in hours, distinct from its number of samples."""
+        return self.chunk_seconds / _HOUR_S
+
+    def time_index(self, valid: np.datetime64) -> int:
+        """Epoch-relative sample index (floored to the native time step)."""
+        return int(valid.astype("datetime64[s]").astype(np.int64)) // self.step_seconds
 
     # listings, over HTTP (S3 XML) or on disk
     def _read_text(self, path: str) -> str:
@@ -176,7 +192,7 @@ class ArchiveCatalog:
 
 # -- reading tiles ---------------------------------------------------------------------------
 class TileReader:
-    """Reads ``(lat, lon, all hours)`` tiles of archive files and keeps them in an LRU."""
+    """Reads ``(lat, lon, all time steps)`` tiles of archive files and keeps them in an LRU."""
 
     def __init__(
         self, catalog: ArchiveCatalog, stats: TransferStats, tile_deg: float, cache_mb: float
@@ -218,7 +234,7 @@ class TileReader:
     def ensure_shape(self, variable: str, hpa: int) -> tuple[int, int]:
         """Grid shape, read once from the newest file (always the (lat, lon, time) layout)."""
         if self.shape is None:
-            last_chunk = int(self.catalog.end.astype(np.int64)) // self.catalog.chunk_hours
+            last_chunk = self.catalog.time_index(self.catalog.end) // self.catalog.chunk_steps
             self.shape = run_async(self._read_shape(self.catalog.path(variable, hpa, last_chunk)))
         return self.shape
 
@@ -353,7 +369,7 @@ def gather_tiles(
     tp: int,
     t_in: int,
 ) -> NDArray[np.float32]:
-    """Values at archive ``rows x cols`` (output order) for one hour, from cached tiles."""
+    """Values at archive ``rows x cols`` (output order) for one time step, from cached tiles."""
     out = np.full((len(rows), len(cols)), np.nan, dtype=np.float32)
     for i, r in enumerate(rows):
         tr, lr = divmod(int(r), tp)
@@ -366,6 +382,11 @@ def gather_tiles(
 # -- the source ------------------------------------------------------------------------------
 class OpenMeteoSource:
     """Isobaric fields of one Open-Meteo archived model.
+
+    This is a stitched forecast archive, not an ERA5-like reanalysis. Original
+    run identities and forecast lead times are not retained (``CubeKey.run``
+    and ``CubeKey.lead`` are ``None``). ``ecmwf_ifs025`` provides 3-hourly data;
+    the enricher interpolates linearly between native valid times.
 
     Parameters
     ----------
@@ -384,8 +405,6 @@ class OpenMeteoSource:
     cache_mb:
         Memory budget of the tile LRU.
     """
-
-    time_step = np.timedelta64(1, "h")
 
     def __init__(  # noqa: PLR0913 - keyword-only configuration of a public source
         self,
@@ -406,6 +425,7 @@ class OpenMeteoSource:
         self._stats = TransferStats()
         variables = [OPENMETEO_VARIABLES[name][0] for name in self.fields.values()]
         self.catalog = ArchiveCatalog(base_url, model, variables, self._stats)
+        self.time_step = self.catalog.time_step
         self.levels = self.catalog.common_levels(levels)
         self.reader = TileReader(self.catalog, self._stats, tile_deg, cache_mb)
         self.reader.final = self._final_path
@@ -427,7 +447,7 @@ class OpenMeteoSource:
         return [self._stats]
 
     @property
-    def chunk_hours(self) -> int:
+    def chunk_hours(self) -> float:
         """Hours per archive file."""
         return self.catalog.chunk_hours
 
@@ -453,17 +473,17 @@ class OpenMeteoSource:
         m = _CHUNK_FILE.search(path)
         if m is None:
             return False
-        end = np.datetime64((int(m.group(1)) + 1) * self.catalog.chunk_hours, "h")
-        return bool(end < np.datetime64("now", "h") - STITCH_WINDOW)
+        end = np.datetime64((int(m.group(1)) + 1) * self.catalog.chunk_seconds, "s")
+        return bool(end < np.datetime64("now", "s") - STITCH_WINDOW)
 
     def coverage(self) -> tuple[np.datetime64, np.datetime64]:
-        """First and last archived hours (the first chunk may start partly empty)."""
+        """First and last archived valid times (the first chunk may start partly empty)."""
         first = self.catalog.locate_first_chunk(*self._probe)
-        return np.datetime64(first * self.catalog.chunk_hours, "h"), self.catalog.end
+        return np.datetime64(first * self.catalog.chunk_seconds, "s"), self.catalog.end
 
     def cube_keys(self, t0: np.datetime64) -> tuple[CubeKey, CubeKey]:
-        """Hours bracketing ``t0`` (no run: the archive keeps the latest run only)."""
-        h = np.datetime64(t0, "h")
+        """Native valid times bracketing ``t0`` (no run: the archive keeps the latest run only)."""
+        h = np.datetime64(self.catalog.time_index(t0) * self.catalog.step_seconds, "s")
         return CubeKey(h), CubeKey(h + self.time_step)
 
     def fetch(
@@ -475,12 +495,14 @@ class OpenMeteoSource:
         level_margin: int = 1,
         executor: Executor | None = None,
     ) -> Cube:
-        """One hour over ``domain`` with the levels bracketing ``p_range`` (Pa)."""
+        """One native time step over ``domain`` with the levels bracketing ``p_range`` (Pa)."""
         start, end = self.coverage()
         if not start <= key.valid <= end:
             raise DataUnavailableError(f"{self.source_id}: {key.valid} outside {start}..{end}")
-        hours = int(key.valid.astype("datetime64[h]").astype(np.int64))
-        chunk, t_in = divmod(hours, self.catalog.chunk_hours)
+        index = self.catalog.time_index(key.valid)
+        if key.valid != np.datetime64(index * self.catalog.step_seconds, "s"):
+            raise ValueError(f"{key.valid} is not aligned to {self.time_step}")
+        chunk, t_in = divmod(index, self.catalog.chunk_steps)
         vertical = pressure_levels(self.levels)
         positions = vertical.select_bracketing(
             p_range[0],
