@@ -15,6 +15,8 @@ the second is for writing a source of one's own or working on cubes directly.
         - OpenMeteoSource
         - OpenMeteoSurfaceSource
         - AromeSurfaceSource
+        - AromePISource
+        - PiafSource
         - SurfaceEnricher
         - SurfaceResult
         - SourceChain

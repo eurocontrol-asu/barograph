@@ -203,18 +203,21 @@ class WCSClient:
         """
         params = [*self._params(), ("coverageid", coverage_id), ("format", "application/wmo-grib")]
         params.extend(("subset", subset) for subset in sorted(subsets))
+        validated = False
 
         def fetch() -> bytes:
+            nonlocal validated
             data = self._request("GetCoverage", params)
             _grib(data)
             if validate is not None:
                 validate(data)
+                validated = True
             return data
 
         if self.cache is None or coverage_run(coverage_id) is None:
             return fetch()
         data = self.cache.get_full(self._namespace, urlencode(params), fetch)
-        if validate is not None:
+        if validate is not None and not validated:
             validate(data)
         return data
 

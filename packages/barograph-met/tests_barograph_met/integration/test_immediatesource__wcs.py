@@ -273,3 +273,25 @@ def test_persistent_cache_survives_source_recreation(tmp_path: Path) -> None:
                 assert len(service.calls) == 1
                 if attempt:
                     assert source.stats[0].bytes > 0
+
+
+def test_wrong_geographic_response_is_rejected_before_cache(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    service = _Service(piaf=True)
+    correct = _grib
+
+    def wrong(field: str, lead: int, step: int, subsets: dict[str, str]) -> bytes:
+        return correct(field, lead, step, {**subsets, "lat": "48,48.25"})
+
+    monkeypatch.setattr(f"{__name__}._grib", wrong)
+    with (
+        service.client,
+        PiafSource(run=RUN, token="fixture-token", client=service.client) as source,
+    ):
+        sampler = SurfaceEnricher(source, cache_dir=tmp_path)
+        for _ in range(2):
+            with pytest.raises(ValueError, match="grid differs"):
+                sampler.enrich(RUN + np.timedelta64(300, "s"), 49.1, 2.1)
+        assert len(service.calls) == 2
+        assert not list(tmp_path.rglob("*.bin"))

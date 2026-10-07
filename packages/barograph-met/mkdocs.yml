@@ -50,6 +50,7 @@ nav:
     - AROME pressure-level archive: howto/arome-pressure.md
     - Surface weather: howto/surface-weather.md
     - AROME forecast runs: howto/arome-runs.md
+    - AROME-PI and PIAF: howto/immediate-forecasts.md
     - FastMeteo-compatible façade: howto/fastmeteo.md
     - Campaigns, cache and parallelism: howto/campaigns.md
   - Reference:
