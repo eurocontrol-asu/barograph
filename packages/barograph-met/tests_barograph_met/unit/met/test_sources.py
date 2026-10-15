@@ -105,3 +105,32 @@ def test_only_final_field_and_time_chunks_are_cached(tmp_path: Path) -> None:
 def test_tiling_follows_the_blosc_bands() -> None:
     tiling = _source().tiling(CubeKey(np.datetime64("1900-02-11T00", "h")))
     assert tiling is None or (tiling.lon_step is None and tiling.lat0 <= float(LAT.min()))
+
+
+def test_field_view_does_not_mutate_parent_and_only_fetches_selected() -> None:
+    source = _source()
+    source.fields["alias"] = "temperature"
+    view = source.select_fields(["t"])
+    assert view.store is source.store
+    assert source.fields == {"t": "temperature", "alias": "temperature"}
+    assert view.fields == {"t": "temperature"}
+    hour = np.datetime64("1900-01-01T00", "h") + np.timedelta64(T0, "h")
+    cube = view.fetch(CubeKey(hour), Domain(44, 46, 25, 35), (26000.0, 28000.0))
+    assert set(cube.fields) == {"t"}
+    for names in ([], ["t", "t"], ["unknown"]):
+        with pytest.raises(ValueError):
+            source.select_fields(names)
+
+
+def test_session_field_selection_preserves_source_mapping() -> None:
+    from baro.met import WeatherSession
+
+    source = _source()
+    source.fields["unused"] = "nonexistent_array"
+    # The unused array must never be fetched or inspected for this query.
+    session = WeatherSession(source, fields=["t"], vertical="linear", on_uncovered="flag")
+    hour = np.datetime64("1900-01-01T00", "h") + np.timedelta64(T0 + 1, "h")
+    result = session.sample([hour], [45.0], [30.0], pressure_pa=[27500])
+    assert result.valid.all()
+    assert set(result.fields) == {"t"}
+    assert "unused" in source.fields

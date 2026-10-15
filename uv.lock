@@ -326,6 +326,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+contrails = [
+    { name = "pycontrails" },
+]
 grib = [
     { name = "eccodes" },
     { name = "eccodeslib" },
@@ -368,8 +371,9 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.26" },
     { name = "omfiles", marker = "extra == 'openmeteo'", specifier = ">=1.2" },
     { name = "pandas", marker = "extra == 'pandas'", specifier = ">=2.0" },
+    { name = "pycontrails", marker = "extra == 'contrails'", specifier = ">=0.63.3,<0.65" },
 ]
-provides-extras = ["grib", "openmeteo", "pandas"]
+provides-extras = ["contrails", "grib", "openmeteo", "pandas"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1063,6 +1067,24 @@ wheels = [
 ]
 
 [[package]]
+name = "dask"
+version = "2026.8.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "cloudpickle" },
+    { name = "fsspec" },
+    { name = "packaging" },
+    { name = "partd" },
+    { name = "pyyaml" },
+    { name = "toolz" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/33/a7/6b3c7ac32b642fbbe0821111654e0bd8cfbe88f68560bcf23cc78ab35c71/dask-2026.8.0.tar.gz", hash = "sha256:8a94c37b5de6d869343340dc26c3c3acca7ec48a3abdabe00ea3abb1125884d5", size = 11561752, upload-time = "2026-08-24T19:21:25.906Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f8/3a/4fc99e788bcfa1b3b3f21abf57da45898d807d007e7f6fd1c7300904eb70/dask-2026.8.0-py3-none-any.whl", hash = "sha256:ccc0c83a189b0398602435189771d28dad7b5773b6089bb8dce14ae732dd782c", size = 1492182, upload-time = "2026-08-24T19:21:23.997Z" },
+]
+
+[[package]]
 name = "defusedxml"
 version = "0.7.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1576,6 +1598,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/40/71/d89bb0e71b1415453980fd32315f2a037aad9f7f70f695c7cec7035feb13/license_expression-30.4.4.tar.gz", hash = "sha256:73448f0aacd8d0808895bdc4b2c8e01a8d67646e4188f887375398c761f340fd", size = 186402, upload-time = "2025-07-22T11:13:32.17Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/af/40/791891d4c0c4dab4c5e187c17261cedc26285fd41541577f900470a45a4d/license_expression-30.4.4-py3-none-any.whl", hash = "sha256:421788fdcadb41f049d2dc934ce666626265aeccefddd25e162a26f23bcbf8a4", size = 120615, upload-time = "2025-07-22T11:13:31.217Z" },
+]
+
+[[package]]
+name = "locket"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/2f/83/97b29fe05cb6ae28d2dbd30b81e2e402a3eed5f460c26e9eaa5895ceacf5/locket-1.0.0.tar.gz", hash = "sha256:5c0d4c052a8bbbf750e056a8e65ccd309086f4f0f18a2eac306a8dfa4112a632", size = 4350, upload-time = "2022-04-20T22:04:44.312Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/db/bc/83e112abc66cd466c6b83f99118035867cecd41802f8d044638aa78a106e/locket-1.0.0-py2.py3-none-any.whl", hash = "sha256:b6c819a722f7b6bd955b80781788e4a66a55628b858d347536b7e81325a3a5e3", size = 4398, upload-time = "2022-04-20T22:04:42.23Z" },
 ]
 
 [[package]]
@@ -2403,6 +2434,19 @@ wheels = [
 ]
 
 [[package]]
+name = "partd"
+version = "1.4.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "locket" },
+    { name = "toolz" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b2/3a/3f06f34820a31257ddcabdfafc2672c5816be79c7e353b02c1f318daa7d4/partd-1.4.2.tar.gz", hash = "sha256:d022c33afbdc8405c226621b015e8067888173d85f7f5ecebb3cafed9a20f02c", size = 21029, upload-time = "2024-05-06T19:51:41.945Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/71/e7/40fb618334dcdf7c5a316c0e7343c5cd82d3d866edc100d98e29bc945ecd/partd-1.4.2-py3-none-any.whl", hash = "sha256:978e4ac767ec4ba5b86c6eaa52e5a2a3bc748a2ca839e8cc798f1cc6ce6efb0f", size = 18905, upload-time = "2024-05-06T19:51:39.271Z" },
+]
+
+[[package]]
 name = "pathspec"
 version = "1.1.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2557,6 +2601,37 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/73/21/d250cfca8ff30c2e5a7447bc13861541126ce9bd4426cd5d0c9f08b5547d/py_serializable-2.1.0.tar.gz", hash = "sha256:9d5db56154a867a9b897c0163b33a793c804c80cee984116d02d49e4578fc103", size = 52368, upload-time = "2025-07-21T09:56:48.07Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/9b/bf/7595e817906a29453ba4d99394e781b6fabe55d21f3c15d240f85dd06bb1/py_serializable-2.1.0-py3-none-any.whl", hash = "sha256:b56d5d686b5a03ba4f4db5e769dc32336e142fc3bd4d68a8c25579ebb0a67304", size = 23045, upload-time = "2025-07-21T09:56:46.848Z" },
+]
+
+[[package]]
+name = "pycontrails"
+version = "0.64.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "dask" },
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "scipy" },
+    { name = "xarray" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/61/db/ab75e68cc7047b373699cc0c91c8e1bda2cc8323a77311dc55d04c4f4242/pycontrails-0.64.0.tar.gz", hash = "sha256:689d2a2daccad92c392ed7a3967b5ae6d8563178b456cce9a0a403cd104a2216", size = 51878832, upload-time = "2026-09-30T15:48:23.011Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/bb/44/5e8c798db8f639d77393b81f86f595c77085ee8b5579216b6b499c2bc9c2/pycontrails-0.64.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:a58cbcb7fb9bba830abd23bb96eef2466432f15cef23e1d6b2124c256c7be98c", size = 1016761, upload-time = "2026-09-30T15:47:57.11Z" },
+    { url = "https://files.pythonhosted.org/packages/af/7d/08770b877e5429d6d7c7877d5c05e7c8d6bb26c93472911409c59d53321c/pycontrails-0.64.0-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:0d72f693e35ec6d43e2a92375587a5b6b8d73add1220c07fe1d5e6ffa7ed0732", size = 1582461, upload-time = "2026-09-30T15:47:58.879Z" },
+    { url = "https://files.pythonhosted.org/packages/3f/b8/bc391cc763c4efabfdf59c07224be0ad8507aae657289fb5daf6b10cd83b/pycontrails-0.64.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:6a503fe67c10e5d129d7ed4bb41a6064a6a855247047e7a9d5c8ecb2e8e668bd", size = 1595350, upload-time = "2026-09-30T15:48:00.549Z" },
+    { url = "https://files.pythonhosted.org/packages/f9/53/1f513c3e82542ec37bbfee5310f319fb25b66d769d812fc7935deede2b4c/pycontrails-0.64.0-cp312-cp312-win_amd64.whl", hash = "sha256:6268e612adeeeac7122e49caa0e9ce1a115de08fe64810da6c9f562a7a2e3b99", size = 1006263, upload-time = "2026-09-30T15:48:02.077Z" },
+    { url = "https://files.pythonhosted.org/packages/28/dc/05b06b11c9575205593005ec8dfe9a16ec0ce9f3d3551c6b879fd3ae9398/pycontrails-0.64.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:5373c708037e399959e439448d4f89824092e1af6b07aadf2383cfe1a2557a25", size = 1016343, upload-time = "2026-09-30T15:48:03.511Z" },
+    { url = "https://files.pythonhosted.org/packages/6b/7e/a67a36085670f247f7c1dea48724ada17587a1aee39daaaeaf7545530bc0/pycontrails-0.64.0-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:13c2b4eae9aeeb44a6e1bb4d5bdb37f1983b9f6fec59d8c08480a48cc8ac3d48", size = 1579689, upload-time = "2026-09-30T15:48:04.959Z" },
+    { url = "https://files.pythonhosted.org/packages/07/1d/83d06da1e288c34cb081b3f7edc760a0c93747b0bef1ed4d2f5ab5645742/pycontrails-0.64.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:1dabe5b52233611ef9997a6c3d9ee32abd9bb271c4402df8f9de218e8becec44", size = 1593492, upload-time = "2026-09-30T15:48:06.59Z" },
+    { url = "https://files.pythonhosted.org/packages/04/fc/881f38a1ccc2e63a9b75b69c2e455b640d62ac57aa1960d60ca8c10d82f5/pycontrails-0.64.0-cp313-cp313-win_amd64.whl", hash = "sha256:5251ec22a422969bb50e98fedc8d9766d42f94bf605e363a077dfcacb9ac6476", size = 1006247, upload-time = "2026-09-30T15:48:08.076Z" },
+    { url = "https://files.pythonhosted.org/packages/1f/2a/1f04b384f759d1c93b70a51eececc1a21f340d5c08f8f4798cf1f84d7038/pycontrails-0.64.0-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:67be02079be923c3ffe4a6555603c33f1deee3d92ad086b9ee33332f22c98c7e", size = 1016777, upload-time = "2026-09-30T15:48:09.733Z" },
+    { url = "https://files.pythonhosted.org/packages/89/d3/7fc342c51d50856ee010440492f708740195709e4a43da2e4994b83aaf5f/pycontrails-0.64.0-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:dc408d78f34d183216e2e89e91efb23d82e08fb5248d3b0cc8bab496137d4fbf", size = 1574391, upload-time = "2026-09-30T15:48:11.135Z" },
+    { url = "https://files.pythonhosted.org/packages/2a/22/0aa571edea9256c471b441fcb45ce486ca8fe41085ee9957902f6ce7f4fc/pycontrails-0.64.0-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:e0917da977db05307f422ff43bdeeccde26d26899778b18adb4feaa40daef21c", size = 1587472, upload-time = "2026-09-30T15:48:12.72Z" },
+    { url = "https://files.pythonhosted.org/packages/f9/a5/185a535550d8ee57f6aa4cde3dca5d5f601852ae3767a10a7cf79f4a4bf8/pycontrails-0.64.0-cp314-cp314-win_amd64.whl", hash = "sha256:c0287f1d892528db98cfc3e10120eb1f262a8817ccda41a6f1df721a0bbac957", size = 1007672, upload-time = "2026-09-30T15:48:14.328Z" },
+    { url = "https://files.pythonhosted.org/packages/c4/48/6b778068d7d7302d09694d612c6bd29caae76224cc60270f2645b2ad0973/pycontrails-0.64.0-cp315-cp315-macosx_11_0_arm64.whl", hash = "sha256:dc64010566bcacc4b5152699040b147a227707a77f6daafc95b731de47b8407e", size = 1016728, upload-time = "2026-09-30T15:48:15.93Z" },
+    { url = "https://files.pythonhosted.org/packages/03/ec/fbd14a3ca1fdf27b4651fd3a5916c1fa5efbd1c3566aa4cbcfc328097019/pycontrails-0.64.0-cp315-cp315-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:3ac80a23db9b74baca94f9055225620174ab9145e94da57ff35af9c21d749fca", size = 1578528, upload-time = "2026-09-30T15:48:17.404Z" },
+    { url = "https://files.pythonhosted.org/packages/ec/38/673198e0da04a44ad233eddbd0a9007bf7c561316e07592c3e849ffe5d22/pycontrails-0.64.0-cp315-cp315-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:7a9dd21856e8199d719d0a683d05f2ad6791774e71ea08793e543c313e27b1e5", size = 1584773, upload-time = "2026-09-30T15:48:19.397Z" },
+    { url = "https://files.pythonhosted.org/packages/a2/16/68ab9c771efb3c1fb60cd1ecb5badac38ad34ba8b65774ee0df441e26d7c/pycontrails-0.64.0-cp315-cp315-win_amd64.whl", hash = "sha256:441ab4e224172655f0b6563378e1a2bba8f10e78a165f30223114023d64c7504", size = 1007610, upload-time = "2026-09-30T15:48:21.01Z" },
 ]
 
 [[package]]
@@ -3403,6 +3478,15 @@ wheels = [
 ]
 
 [[package]]
+name = "toolz"
+version = "1.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/31/6f/ae20c212a07aa2d156c787383d8088a5e045ee39628661edb190c97e1659/toolz-1.2.0.tar.gz", hash = "sha256:9667a038e9d6ecba37995e26cb2f59ec6420b6ad8dd9677de59db9b956b08490", size = 55442, upload-time = "2026-10-07T04:16:25.639Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/db/17/4c8beb6c8c4176c6bf143bfd7e1e4dd6719b00ced90738c7ac471b71c1df/toolz-1.2.0-py3-none-any.whl", hash = "sha256:890f820b1cb8152785aaf9386d8707770110809035800985ca65cb24ce1120ef", size = 60789, upload-time = "2026-10-07T04:16:24.173Z" },
+]
+
+[[package]]
 name = "torch"
 version = "2.14.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3637,4 +3721,18 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/12/ad/307b55d8e0a9484c48e8f78f40e9b9a4a9af0c9e2e1c5209ad6d5a09c77c/wcwidth-0.9.1-cp314-cp314t-win_amd64.whl", hash = "sha256:eab587e18e7cadf1a750b0098fc8bebfb62c125eb9306f2268f0443a282a3d78", size = 604398, upload-time = "2026-09-23T20:23:47.672Z" },
     { url = "https://files.pythonhosted.org/packages/36/f1/69566660f633e2a93df7dad7353761562e9f71bf8a5a7b1eb7f34793b45d/wcwidth-0.9.1-cp314-cp314t-win_arm64.whl", hash = "sha256:03cfca3dcbffa86564290fe3c9978a6191ba003e8ced7f7dbda315fcb3fbe725", size = 602291, upload-time = "2026-09-23T20:23:42.345Z" },
     { url = "https://files.pythonhosted.org/packages/96/a2/f06f2e0be4895e5943d358755b51968ace85774cf0a4cc42b4dafb793832/wcwidth-0.9.1-py3-none-any.whl", hash = "sha256:e0c3a1c45c5b9550c6919a4449e95f5b177f6e165786376981db8f1addae9b21", size = 300656, upload-time = "2026-09-23T20:23:20.674Z" },
+]
+
+[[package]]
+name = "xarray"
+version = "2026.9.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "packaging" },
+    { name = "pandas" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ff/f5/781c70b234f54e0401f4f7c4427a7486da38d50dbb138c7d7c55144b3d86/xarray-2026.9.0.tar.gz", hash = "sha256:6abc69694c22fa1f0fb2f357ff4e41d88beb4477ed71091f944b7dbf67ed54fe", size = 3176922, upload-time = "2026-09-29T23:06:25.807Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3f/44/3159af4fb3c868970a412e294320ed6bb1a9fbdfa6431050eda8e0b34b6e/xarray-2026.9.0-py3-none-any.whl", hash = "sha256:fe349fa871628b1a0a5217af3fe1283a2862d5485156e6eda354fffb81c3bb7c", size = 1445445, upload-time = "2026-09-29T23:06:23.686Z" },
 ]

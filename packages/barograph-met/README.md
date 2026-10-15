@@ -21,6 +21,9 @@
 aircraft positions (time, latitude, longitude, barometric altitude).
 It also retrieves surface weather at fixed sites or along trajectories using
 only time, latitude and longitude.
+For contrail modelling, it can retrieve ERA5 humidity, pressure velocity,
+cirrus optical depth and radiation, export native grids to pycontrails or
+diffcocip, and supply weather during checked forward diffcocip evolution.
 
 ```python
 from baro.met import Enricher, arco_model_levels, track_components
@@ -60,6 +63,13 @@ along, cross = track_components(res["u"], res["v"], track_deg)
   the number of flights; an on-disk cache of the byte ranges read, shared by
   calls and processes (a byte is downloaded once, whatever the call order);
   per-host concurrency caps, retry with backoff.
+- **Persistent weather sessions**: bounded decoded-cube reuse for successive
+  point queries, with explicit pressure interpolation and field selection.
+- **Contrail weather**: targeted pressure-level windows, separate upper-column
+  cirrus dependencies and ERA5 midpoint radiation. Optional engine exports and
+  a coverage-checked diffcocip forward driver with explicit age cap; see
+  [weather grids](docs/howto/weather-cubes.md) and
+  [adaptive evolution](docs/howto/diffcocip.md). Engine dependencies remain optional.
 - **FastMeteo-compatible façade**: `baro.met.compat.ArcoEra5` and
   `Arpege`, same constructors and `interpolate(df)`.
 
@@ -68,6 +78,7 @@ along, cross = track_components(res["u"], res["v"], track_deg)
 ```bash
 pip install barograph-met                              # ERA5
 pip install 'barograph-met[grib,pandas,openmeteo]'     # + ARPEGE, FastMeteo façade, archive
+pip install 'barograph-met[contrails]'               # + pycontrails exports and cirrus calculation
 ```
 
 ## Benchmarks

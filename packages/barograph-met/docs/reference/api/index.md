@@ -9,6 +9,13 @@ the second is for writing a source of one's own or working on cubes directly.
       members:
         - Enricher
         - EnrichResult
+        - WeatherSession
+        - WeatherWindowProvider
+        - ArcoRadiationSource
+        - materialize_weather
+        - materialize_radiation
+        - run_diffcocip
+        - EvolutionResult
         - arco_model_levels
         - arco_pressure_levels
         - ArpegeSource
@@ -41,6 +48,10 @@ the second is for writing a source of one's own or working on cubes directly.
         - SurfaceVariable
         - CubeKey
         - Cube
+        - WeatherCube
+        - RadiationCube
+        - WeatherRequest
+        - WeatherDemand
         - GridSource
         - Tiling
         - RangeCache

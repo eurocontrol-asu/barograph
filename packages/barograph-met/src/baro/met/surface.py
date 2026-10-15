@@ -72,7 +72,11 @@ def _period(
 
 @dataclass(frozen=True)
 class SurfaceVariable:
-    """Unit, height above ground and native temporal meaning of one field."""
+    """Unit, height above ground and native temporal meaning of one field.
+
+    ``height_m`` is NaN when no finite height applies, as for a
+    top-of-atmosphere radiative boundary.
+    """
 
     unit: str
     height_m: float
@@ -230,11 +234,15 @@ class SurfaceEnricher:
         result.flags[valid & ~covered] = Flag.OUT_OF_COVERAGE
         points = np.flatnonzero(valid & covered)
         step_ns = int(self.source.time_step / np.timedelta64(1, "ns"))
-        groups = times[points].astype(np.int64) // step_ns
+        # Some interval averages are interpolated at their midpoints rather
+        # than on epoch-aligned hours (ERA5 radiation, for example).
+        origin = np.datetime64(getattr(self.source, "time_origin", "1970-01-01"), "ns")
+        origin_ns = int(origin.astype(np.int64))
+        groups = (times[points].astype(np.int64) - origin_ns) // step_ns
         before = sum(s.bytes for s in self.source.stats)
         for group in np.unique(groups):
             selected = points[groups == group]
-            t0 = np.datetime64(int(group) * step_ns, "ns")
+            t0 = np.datetime64(int(group) * step_ns + origin_ns, "ns")
             self._interval(result, (times, la, lo), selected, t0)
         self._wind(result, times)
         result.stats = {"bytes": sum(s.bytes for s in self.source.stats) - before}

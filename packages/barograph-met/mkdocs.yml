@@ -49,6 +49,8 @@ nav:
     - ARPEGE, live and archive: howto/arpege.md
     - AROME pressure-level archive: howto/arome-pressure.md
     - Surface weather: howto/surface-weather.md
+    - Weather cubes and contrail engines: howto/weather-cubes.md
+    - Adaptive diffcocip evolution: howto/diffcocip.md
     - AROME forecast runs: howto/arome-runs.md
     - AROME-PI and PIAF: howto/immediate-forecasts.md
     - FastMeteo-compatible façade: howto/fastmeteo.md

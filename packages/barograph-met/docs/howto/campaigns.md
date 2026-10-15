@@ -47,3 +47,51 @@ enricher = Enricher(arco_model_levels(), cache_dir="/shared/era5-cache")
   `baro.met.set_host_limit(host, n)`.
 - 429/5xx answers are retried with backoff (honouring `Retry-After`), logged
   on the `baro.met.http` logger and counted in `res.stats["throttled"]`.
+
+## Reuse decoded weather between calls
+
+`Enricher` releases decoded cubes after each call. For successive pressure-point
+queries, a `WeatherSession` also keeps a bounded in-memory LRU:
+
+```python
+from baro.met import WeatherSession, arco_pressure_levels
+
+source = arco_pressure_levels()
+session = WeatherSession(
+    source,
+    fields=["u", "v"],
+    vertical="linear",
+    max_cache_bytes=128 * 1024 * 1024,
+    cache_dir=".weather-cache",
+)
+result = session.sample(
+    ["2020-01-01T12:30:00.123456789"],
+    [48.0],
+    [2.0],
+    pressure_pa=[25_000.0],
+)
+assert result.valid.all()
+print(result["u"], session.cache_info())
+session.clear()
+```
+
+The session uses the same storage tiling, pressure bracketing, byte cache and
+interpolation as `Enricher`. It reuses a decoded request when the validity time,
+forecast run and requested region and pressure range are covered. Leaving that
+region triggers a normal source fetch. It never extrapolates missing weather;
+check result flags before interpreting a model state as physically expired.
+
+Field selection uses `GridSource.select_fields`, an independent field mapping
+sharing the original stores. Other sources can be configured with their own
+fields before creating the session. Fields are fixed for the session's lifetime.
+Do not mutate source configuration during use. Like `Enricher`, attaching an
+on-disk cache changes the shared stores' byte-cache configuration.
+
+The byte limit includes compact copies of fields, surface pressure, coordinates
+and vertical coefficients retained by the LRU. It excludes Python overhead and
+active interpolation/prefetch allocations; an oversized cube is sampled but
+not retained. Cache counters in `result.stats` separate decoded hits and misses
+from source transfer statistics. Calls on one session are serialized; each
+call keeps the usual concurrent source reads. A session represents a snapshot:
+use `clear()` when refreshing mutable forecasts or ERA5T. Clearing does not
+remove the immutable on-disk byte cache or reset lifetime LRU counters.

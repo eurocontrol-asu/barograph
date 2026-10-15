@@ -5,8 +5,9 @@ from __future__ import annotations
 import hashlib
 import re
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from concurrent.futures import Executor
+from copy import copy
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -92,6 +93,7 @@ class GridSource:
         self.store = store
         self.vertical = vertical
         self.fields = dict(fields or DEFAULT_FIELDS)
+        self._cache_fields = set(self.fields.values())
         self.surface_pressure = surface_pressure
         if vertical.needs_surface_pressure and surface_pressure is None:
             raise ValueError("hybrid levels need a surface pressure array")
@@ -111,6 +113,24 @@ class GridSource:
         self._lock = threading.Lock()
         self._tiling: Tiling | None = None
         self._tiling_known = False
+
+    def select_fields(self, names: Sequence[str]) -> GridSource:
+        """Independent field view sharing stores and byte caches with this source.
+
+        Only listed output fields are fetched. Cache eligibility retains all
+        original fields, so attaching a cache through a view cannot narrow the
+        parent's cache policy. Configure shared stores before concurrent use.
+        """
+        if not names or len(set(names)) != len(names):
+            raise ValueError("fields must be a nonempty sequence of unique names")
+        unknown = set(names) - self.fields.keys()
+        if unknown:
+            raise ValueError(f"unknown fields: {sorted(unknown)}")
+        view = copy(self)
+        view.fields = {name: self.fields[name] for name in names}
+        view._tiling = None
+        view._tiling_known = False
+        return view
 
     @property
     def stats(self) -> list[TransferStats]:
@@ -191,7 +211,7 @@ class GridSource:
 
     def use_cache(self, cache: RangeCache) -> None:
         """Keep the final hours' field chunks in ``cache`` (see the class docstring)."""
-        arrays = {*self.fields.values(), "time"}  # past time chunks never change either
+        arrays = {*self._cache_fields, "time"}  # past time chunks never change either
         stores = [(self.store, arrays)]
         if self.surface_pressure is not None:
             sp = self.surface_pressure

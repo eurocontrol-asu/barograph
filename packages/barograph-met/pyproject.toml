@@ -30,6 +30,7 @@ dependencies = [
 grib = ["eccodes>=2.38", "eccodeslib>=2.38"]
 pandas = ["pandas>=2.0"]
 openmeteo = ["omfiles>=1.2"]
+contrails = ["pycontrails>=0.63.3,<0.65"]
 
 [project.urls]
 Homepage = "https://github.com/eurocontrol-asu/barograph"
