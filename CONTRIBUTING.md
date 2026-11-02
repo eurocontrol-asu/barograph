@@ -8,13 +8,14 @@ package directory is given. Python 3.12+, uv and Git are required.
 ```bash
 git clone https://github.com/eurocontrol-asu/barograph.git
 cd barograph
-uv sync --all-packages --all-groups
+uv sync --all-packages --all-groups --all-extras --locked
 uv run prek install --hook-type pre-commit --hook-type commit-msg --hook-type pre-push
 ```
 
 The sync installs every member with its optional backends (GRIB decoding,
-pandas, Open-Meteo reader) and the development, documentation and quality
-groups.
+pandas, Open-Meteo reader, native pycontrails adapter) and the development,
+documentation and quality groups. This matches the test CI environment;
+optional runtime dependencies remain optional for library users.
 
 ## Making changes
 
