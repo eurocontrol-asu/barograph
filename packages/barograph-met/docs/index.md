@@ -24,6 +24,9 @@ res["u"], res["v"], res["t"], res.flags, res.stats
 
 Start with the [tutorial](tutorials/getting-started.md), or jump to a
 [how-to guide](howto/index.md).
+The [IFS guide](howto/ifs.md) explains its three-hour archive and forecast
+provenance, and [AROME-PI/PIAF access](howto/immediate-forecasts.md) shows how
+to keep Météo-France API keys in private files outside the repository.
 
 For surface weather, `SurfaceEnricher` accepts time, latitude and longitude
 without altitude. `OpenMeteoSurfaceSource` reads archived 10 m wind, gusts,
