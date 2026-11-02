@@ -36,6 +36,8 @@ jobs:
       - run: uv sync --all-packages --all-groups --locked
       # Ruff + format + per-package mypy: the single source of truth is `make lint`.
       - run: make lint
+      - name: Test release CI helpers
+        run: python -m unittest discover -s .github/scripts -p test_release_ci.py -v
       # These providers use runtime APIs that dependency metadata may not bound.
       # Catch incompatible lockfile updates before the main-only badge workflow.
       - name: Check quality tool startup
