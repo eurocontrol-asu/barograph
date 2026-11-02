@@ -1,18 +1,16 @@
 {
-  "score": 97.5,
+  "score": 95.4,
   "grade": "A",
   "passed": [
     "ARCH_CIRCULAR: 0 circular import(s) found",
     "ARCH_GOD_CLASS: 0 god class(es) found",
-    "ARCH_COUPLING: Coupling: 12 module(s) above threshold (-36 pts)",
+    "ARCH_COUPLING: Coupling: 16 module(s) above threshold (-48 pts)",
     "ARCH_DUPLICATION: 0 duplicate block(s) found",
     "QUALITY_COMPLEXITY: Complexity score: 100/100 (0 high-complexity functions)",
-    "QUALITY_TESTS: Test coverage: 92% (92/100)",
     "QUALITY_DEAD_CODE: No dead code detected.",
     "QUALITY_LINT: Lint score: 100/100 (0 issues)",
     "QUALITY_FORMAT: Format score: 100/100 (0 unformatted)",
     "QUALITY_DIFF_SIZE: No uncommitted changes",
-    "DEPS_AUDIT: No known vulnerabilities",
     "DEPS_HYGIENE: 1 dependency issue(s) found",
     "QUALITY_TYPE: Type score: 100/100 (0 errors)",
     "PRACTICE_TEST_MIRROR: All source modules have test files",
@@ -21,8 +19,8 @@
     "PRACTICE_BLOCKING_IO: 0 blocking-IO violation(s) found",
     {
       "rule_id": "PRACTICE_DOCSTRING",
-      "message": "Docstring coverage: 90% (178/198)",
-      "text": "     \u2022 baro/met/wcs.py: fetch\n     \u2022 baro/met/surface.py: stats, coverage, cube_keys, tiling, use_cache, fetch\n     \u2022 baro/met/immediate.py: catalog, metadata, field, validate\n     \u2022 baro/met/arome_surface.py: stats, close, tiling, use_cache, published_runs, coverage, cube_keys, file_key, fetch",
+      "message": "Docstring coverage: 88% (215/244)",
+      "text": "     \u2022 baro/met/immediate.py: catalog, metadata, field, validate\n     \u2022 baro/met/surface.py: stats, coverage, cube_keys, tiling, use_cache, fetch\n     \u2022 baro/met/arome_surface.py: stats, close, tiling, use_cache, published_runs, coverage, cube_keys, file_key, fetch\n     \u2022 baro/met/diffcocip.py: reset, temperature\n     \u2022 baro/met/session.py: contains, fetch\n     \u2022 baro/met/wcs.py: fetch\n     \u2022 baro/met/store.py: configure, clear, info, get, load",
       "fix_hint": "Add docstrings to public functions"
     },
     "PRACTICE_ENV_CREDENTIAL_READ: 0 credential environment read(s) found",
@@ -67,5 +65,18 @@
     "TOOL_MYPY: mypy found",
     "TOOL_UV: uv found"
   ],
-  "failed": []
+  "failed": [
+    {
+      "rule_id": "QUALITY_TESTS",
+      "message": "Test coverage: 90% (89/100)",
+      "text": "\u2022 cov 90% \u2192 100%",
+      "fix_hint": "Increase test coverage to >= 90%"
+    },
+    {
+      "rule_id": "DEPS_AUDIT",
+      "message": "2 vulnerable package(s) found",
+      "text": "\u2022 certifi 2026.7.22\u21922026.10.18 PYSEC-2026-4320+1\n\u2022 filelock 4.0.7\u21924.0.9,4.2.1 CVE-2026-112940+13",
+      "fix_hint": "Run: pip-audit --fix to remediate"
+    }
+  ]
 }
