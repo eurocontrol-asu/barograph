@@ -15,6 +15,7 @@ import logging
 import re
 import threading
 import time
+from collections import OrderedDict
 from collections.abc import Callable, Sequence
 from concurrent.futures import Executor
 from dataclasses import dataclass, field
@@ -321,6 +322,73 @@ def _parse_fill(value: Any) -> float | None:
     return float(value)
 
 
+class _DecodedRuns:
+    """Per-reader byte LRU; acquisition stays outside its short bookkeeping lock."""
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.entries: OrderedDict[tuple[str, tuple[int, int]], bytes] = OrderedDict()
+        self.generation = 0
+        self.budget = self.bytes = 0
+        self.hits = self.misses = self.evictions = 0
+        self.immutable: Callable[[str], bool] = lambda key: False
+
+    def configure(self, max_bytes: int, immutable: Callable[[str], bool]) -> None:
+        if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or max_bytes < 0:
+            raise ValueError("max_bytes must be a nonnegative integer")
+        with self.lock:
+            self.generation += 1
+            self.entries.clear()
+            self.bytes = 0
+            self.budget = max_bytes
+            self.immutable = immutable
+
+    def clear(self) -> None:
+        with self.lock:
+            self.generation += 1
+            self.entries.clear()
+            self.bytes = 0
+
+    def info(self) -> dict[str, int]:
+        with self.lock:
+            return {
+                "bytes": self.bytes,
+                "entries": len(self.entries),
+                "max_bytes": self.budget,
+                "hits": self.hits,
+                "misses": self.misses,
+                "evictions": self.evictions,
+            }
+
+    def get(self, key: tuple[str, tuple[int, int]], load: Callable[[], bytes]) -> bytes:
+        # Concurrent identical misses may decode twice, but retain once.
+        with self.lock:
+            generation = self.generation
+            eligible = bool(self.budget and self.immutable(key[0]))
+            if eligible and key in self.entries:
+                self.entries.move_to_end(key)
+                self.hits += 1
+                return self.entries[key]
+            self.misses += 1
+        data = load()
+        if eligible:
+            return self._retain(key, data, generation)
+        return data
+
+    def _retain(self, key: tuple[str, tuple[int, int]], data: bytes, generation: int) -> bytes:
+        with self.lock:
+            if generation == self.generation and len(data) <= self.budget:
+                if key in self.entries:
+                    self.entries.move_to_end(key)
+                    return self.entries[key]
+                while self.entries and self.bytes + len(data) > self.budget:
+                    self.bytes -= len(self.entries.popitem(last=False)[1])
+                    self.evictions += 1
+                self.entries[key] = data
+                self.bytes += len(data)
+        return data
+
+
 class ZarrStore:
     """Consolidated zarr-v2 store with region reads over a ``ByteStore``."""
 
@@ -331,6 +399,26 @@ class ZarrStore:
         self._meta = meta
         self._headers: Lru[str, BloscHeader | None] = Lru(_MAX_HEADERS)
         self._lock = threading.Lock()
+        self._decoded = _DecodedRuns()
+
+    def configure_decoded_cache(self, max_bytes: int, *, immutable: Callable[[str], bool]) -> None:
+        """Retain exact decoded Blosc runs for explicitly immutable chunk keys.
+
+        Zero disables retention. Reconfiguration clears entries. The predicate
+        must identify immutable objects in this reader's fixed store; mutable
+        forecast chunks must never qualify. Do not replace the backing store
+        without clearing/reconfiguring this cache. Payload bytes alone are
+        bounded, excluding headers, temporary decoding and caller arrays.
+        """
+        self._decoded.configure(max_bytes, immutable)
+
+    def clear_decoded_cache(self) -> None:
+        """Release retained decoded runs, preserving lifetime counters."""
+        self._decoded.clear()
+
+    def decoded_cache_info(self) -> dict[str, int]:
+        """Retained payload and lifetime exact-run LRU counters."""
+        return self._decoded.info()
 
     @property
     def attrs(self) -> dict[str, Any]:
@@ -462,10 +550,15 @@ class ZarrStore:
             u0 = 0
         else:
             first, last = task.run
-            c0, c1 = task.header.compressed_span(first, last)
-            payload = self.store.get(meta.chunk_key(task.chunk), c0, c1)
-            data = decode_run(task.header, first, last, payload)
-            u0 = task.header.block_span(first)[0]
+            header = task.header
+            chunk = meta.chunk_key(task.chunk)
+
+            def load() -> bytes:
+                c0, c1 = header.compressed_span(first, last)
+                return decode_run(header, first, last, self.store.get(chunk, c0, c1))
+
+            data = self._decoded.get((chunk, task.run), load)
+            u0 = header.block_span(first)[0]
         for slab in slabs:
             if u0 <= slab.start and slab.stop <= u0 + len(data):
                 buf = data[slab.start - u0 : slab.stop - u0]

@@ -25,6 +25,8 @@ information to aircraft trajectories (ADS-B, flight data).
 |---|---|
 | [`barograph-met`](packages/barograph-met) | Wind and temperature at aircraft positions from ERA5 (137 model levels or pressure levels) and Météo-France ARPEGE (live open data and the Open-Meteo archive), with partial reads of only the bytes a flight needs, explicit coverage, and a FastMeteo-compatible façade |
 
+- [Lazy native pycontrails weather](packages/barograph-met/docs/howto/lazy-pycontrails-weather.md), with targeted field reads and optional bounded decoded Blosc reuse.
+
 ## Installation
 
 ```bash

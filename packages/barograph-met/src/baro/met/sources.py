@@ -209,6 +209,24 @@ class GridSource:
         """Number of leading (time, level) dimensions of array ``name``."""
         return len(self.store.array(name).shape) - 2
 
+    def configure_decoded_cache(self, max_bytes: int) -> None:
+        """Bound decoded Blosc reuse to final field chunks, using ``final_after``.
+
+        Field views share this reader and its budget. Recent ERA5T chunks never
+        qualify. Surface pressure in a separate reader has its own budget.
+        """
+        if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or max_bytes < 0:
+            raise ValueError("max_bytes must be a nonnegative integer")
+        if not max_bytes:
+            self.store.configure_decoded_cache(0, immutable=lambda key: False)
+            return
+        arrays = set(self._cache_fields)
+        if self.surface_pressure is not None and self.surface_pressure.store is self.store:
+            arrays.add(self.surface_pressure.array)
+        self.store.configure_decoded_cache(
+            max_bytes, immutable=_final_keys(self.store, arrays, self.final_after)
+        )
+
     def use_cache(self, cache: RangeCache) -> None:
         """Keep the final hours' field chunks in ``cache`` (see the class docstring)."""
         arrays = {*self._cache_fields, "time"}  # past time chunks never change either

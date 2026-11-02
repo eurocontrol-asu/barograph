@@ -6,7 +6,7 @@ import importlib
 from collections.abc import Mapping, Sequence
 from concurrent.futures import Executor, ThreadPoolExecutor
 from contextlib import nullcontext
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import numpy as np
@@ -163,12 +163,35 @@ def _provenance(source: GridSource, tau_cirrus: bool) -> dict[str, str]:
     return provenance
 
 
-def _stack_fields(cubes: Sequence[Cube], names: Sequence[str]) -> dict[str, NDArray[Any]]:
-    """Reorder descending-latitude slices into native engine axis order."""
-    return {
-        name: np.stack([c.fields[name][:, ::-1].transpose(2, 1, 0) for c in cubes], axis=-1)
-        for name in names
-    }
+def _read_weather_times(
+    source: GridSource,
+    request: WeatherRequest,
+    times: NDArray[np.datetime64],
+    pool: Executor,
+) -> tuple[Cube, dict[str, NDArray[Any]]]:
+    """Copy one hour at a time; cropped fetch views may own global row buffers."""
+    reference = None
+    values: dict[str, NDArray[Any]] = {}
+    for index, time in enumerate(times):
+        cube = source.fetch(CubeKey(time), request.domain, request.pressure_pa, executor=pool)
+        if reference is None:
+            _check_domain(request.domain, cube.lat, cube.lon)
+            reference = replace(cube, fields={}, ps=None)
+            values = {
+                name: np.empty((*field.shape[::-1], len(times)), dtype=field.dtype)
+                for name, field in cube.fields.items()
+            }
+        else:
+            _check_grids((reference, cube))
+        for name, field in cube.fields.items():
+            if field.dtype != values[name].dtype:
+                raise ValueError("weather window field dtypes must agree across times")
+            values[name][..., index] = field[:, ::-1].transpose(2, 1, 0)
+        # Neither the grid reference nor a loop variable may pin a decoded strip.
+        del field, cube
+    if reference is None:
+        raise ValueError("weather window needs at least one time")
+    return reference, values
 
 
 def materialize_weather(  # noqa: PLR0913 - explicit retrieval/preprocessing options
@@ -197,16 +220,14 @@ def materialize_weather(  # noqa: PLR0913 - explicit retrieval/preprocessing opt
     metadata = dict(_UNITS if units is None else units)
     _validate_units(source, names, metadata)
     selected = source.select_fields(names)
-    times = _times(request, np.datetime64("1970-01-01"), source.time_step, source.coverage())
+    times = _times(
+        request,
+        getattr(source, "time_origin", np.datetime64("1970-01-01")),
+        source.time_step,
+        source.coverage(),
+    )
     with ThreadPoolExecutor(max_workers=8) if executor is None else nullcontext(executor) as pool:
-        cubes = [
-            selected.fetch(CubeKey(t), request.domain, request.pressure_pa, executor=pool)
-            for t in times
-        ]
-    first = cubes[0]
-    _check_domain(request.domain, first.lat, first.lon)
-    _check_grids(cubes)
-    values = _stack_fields(cubes, names)
+        first, values = _read_weather_times(selected, request, times, pool)
     if tau_cirrus:
         values["tau_cirrus"] = _derive_tau(source, request, first.vertical.ids, times)
         metadata["tau_cirrus"] = "1"
@@ -245,10 +266,15 @@ def _derive_tau(
     return tau[:, :, positions, :]
 
 
-def materialize_radiation(source: ArcoRadiationSource, request: WeatherRequest) -> RadiationCube:
+def materialize_radiation(
+    source: ArcoRadiationSource, request: WeatherRequest, *, fields: Sequence[str] | None = None
+) -> RadiationCube:
     """Read only bracketing ERA5 midpoint fluxes on the requested domain."""
     times = _times(request, source.time_origin, source.time_step, source.coverage())
-    cubes = [source.fetch(CubeKey(t), request.domain) for t in times]
+    names = tuple(source.variables if fields is None else fields)
+    if not names or len(set(names)) != len(names) or set(names) - source.variables.keys():
+        raise ValueError("select unique configured radiation fields")
+    cubes = [source.fetch(CubeKey(t), request.domain, fields=names) for t in times]
     first = cubes[0]
     _check_domain(request.domain, first.lat, first.lon)
     return RadiationCube(

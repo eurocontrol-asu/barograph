@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
+from typing import Any
+
 import httpx
+import numpy as np
 import pytest
 
-from baro.met.store import USER_AGENT, HttpStore, MissingChunkError, list_s3
+from baro.met import store as module
+from baro.met.blosc import decode_run
+from baro.met.store import USER_AGENT, HttpStore, MissingChunkError, ZarrStore, list_s3
+from synthetic import ArraySpec, memory_zarr
 
 TARGET = "https://bucket.example/pnt"
 
@@ -126,3 +134,110 @@ def test_s3_listings_follow_continuation_tokens(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr("baro.met.store.httpx.get", get)
     assert list_s3("https://b.example", "data/", dirs=True) == ["data/a/", "data/b/"]
     assert calls[1]["continuation-token"] == "t2" and calls[0]["delimiter"] == "/"
+
+
+BLOCK_BYTES = 65536
+
+
+def reader(budget: int = BLOCK_BYTES) -> tuple[ZarrStore, Any]:
+    data = np.arange(2 * 2 * 96 * 256, dtype="<f4").reshape(2, 2, 96, 256)
+    zarr = ZarrStore(
+        memory_zarr([ArraySpec("t", data, (1, 2, 96, 256), ("t", "l", "y", "x"))]),
+        full_read_ratio=1.1,
+    )
+    zarr.configure_decoded_cache(budget, immutable=lambda key: True)
+    return zarr, data
+
+
+def test_overlap_exact_run_and_level_chunk_isolation() -> None:
+    zarr, data = reader(BLOCK_BYTES * 4)
+    np.testing.assert_array_equal(zarr.read_rows("t", [(0, 0)], slice(0, 2))[0], data[0, 0, :2])
+    before = zarr.store.stats.bytes
+    np.testing.assert_array_equal(zarr.read_rows("t", [(0, 0)], slice(1, 3))[0], data[0, 0, 1:3])
+    assert zarr.store.stats.bytes == before
+    assert zarr.decoded_cache_info()["hits"] == 1
+    for lead in ((0, 1), (1, 0)):
+        np.testing.assert_array_equal(zarr.read_rows("t", [lead], slice(0, 2))[0], data[*lead, :2])
+    assert zarr.decoded_cache_info()["entries"] == 3
+
+
+def test_eviction_oversize_disabled_and_clear() -> None:
+    zarr, _ = reader()
+    zarr.read_rows("t", [(0, 0)], slice(0, 2))
+    zarr.read_rows("t", [(0, 1)], slice(0, 2))
+    assert zarr.decoded_cache_info()["evictions"] == 1
+    assert zarr.decoded_cache_info()["bytes"] == BLOCK_BYTES
+    zarr.clear_decoded_cache()
+    assert zarr.decoded_cache_info()["entries"] == 0
+    for budget in (0, BLOCK_BYTES - 1):
+        zarr.configure_decoded_cache(budget, immutable=lambda key: True)
+        zarr.read_rows("t", [(0, 0)], slice(0, 2))
+        assert zarr.decoded_cache_info()["bytes"] == 0
+    with pytest.raises(ValueError, match="nonnegative"):
+        zarr.configure_decoded_cache(-1, immutable=lambda key: True)
+
+
+def test_mutable_keys_are_not_retained() -> None:
+    zarr, _ = reader()
+    zarr.configure_decoded_cache(BLOCK_BYTES, immutable=lambda key: False)
+    for _ in range(2):
+        zarr.read_rows("t", [(0, 0)], slice(0, 2))
+    assert zarr.decoded_cache_info()["entries"] == zarr.decoded_cache_info()["hits"] == 0
+
+
+@pytest.mark.parametrize("same_key", [False, True])
+def test_concurrent_loads_do_not_serialize_or_double_account(
+    monkeypatch: pytest.MonkeyPatch, same_key: bool
+) -> None:
+    zarr, data = reader(BLOCK_BYTES * 2)
+    barrier = Barrier(2)
+    decode = decode_run
+
+    def synchronized(*args: Any) -> bytes:
+        barrier.wait(timeout=5)
+        return decode(*args)
+
+    monkeypatch.setattr(module, "decode_run", synchronized)
+    leads = [(0, 0), (0, 0) if same_key else (1, 0)]
+    with ThreadPoolExecutor(2) as pool:
+        results = list(pool.map(lambda lead: zarr.read_rows("t", [lead], slice(0, 2)), leads))
+    for lead, result in zip(leads, results, strict=True):
+        np.testing.assert_array_equal(result[0], data[*lead, :2])
+    count = 1 if same_key else 2
+    assert zarr.decoded_cache_info()["entries"] == count
+    assert zarr.decoded_cache_info()["bytes"] == count * BLOCK_BYTES
+
+
+def test_clear_during_fill_discards_inflight_retention(monkeypatch: pytest.MonkeyPatch) -> None:
+    zarr, _ = reader()
+    decode = decode_run
+
+    def clearing(*args: Any) -> bytes:
+        zarr.clear_decoded_cache()
+        return decode(*args)
+
+    monkeypatch.setattr(module, "decode_run", clearing)
+    zarr.read_rows("t", [(0, 0)], slice(0, 2))
+    assert zarr.decoded_cache_info()["entries"] == 0
+
+
+def test_full_chunk_fallback_does_not_retain_decoded_runs() -> None:
+    zarr, data = reader(BLOCK_BYTES * 8)
+    zarr.full_read_ratio = 0.0
+    np.testing.assert_array_equal(zarr.read_rows("t", [(0, 0)], slice(0, 2))[0], data[0, 0, :2])
+    assert zarr.decoded_cache_info()["entries"] == 0
+
+
+def test_failed_decoded_run_can_be_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    zarr, data = reader()
+
+    def broken(*args: Any) -> bytes:
+        raise ValueError("damaged payload")
+
+    monkeypatch.setattr(module, "decode_run", broken)
+    with pytest.raises(ValueError, match="damaged payload"):
+        zarr.read_rows("t", [(0, 0)], slice(0, 2))
+    assert zarr.decoded_cache_info()["entries"] == 0
+    monkeypatch.setattr(module, "decode_run", decode_run)
+    np.testing.assert_array_equal(zarr.read_rows("t", [(0, 0)], slice(0, 2))[0], data[0, 0, :2])
+    assert zarr.decoded_cache_info()["entries"] == 1

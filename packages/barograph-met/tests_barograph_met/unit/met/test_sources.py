@@ -134,3 +134,18 @@ def test_session_field_selection_preserves_source_mapping() -> None:
     assert result.valid.all()
     assert set(result.fields) == {"t"}
     assert "unused" in source.fields
+
+
+def test_decoded_cache_uses_final_chunk_policy_and_cheap_disable() -> None:
+    src = _source()
+    before = src.store.store.stats.bytes
+    src.configure_decoded_cache(0)
+    with pytest.raises(ValueError, match="nonnegative"):
+        src.configure_decoded_cache(-1)
+    assert src.store.store.stats.bytes == before
+    src.configure_decoded_cache(65536)
+    assert src.store._decoded.immutable("temperature/0.0.0.0")
+    assert not src.store._decoded.immutable("unknown/0.0.0.0")
+    src.final_after = np.timedelta64(100000, "D")
+    src.configure_decoded_cache(65536)
+    assert not src.store._decoded.immutable("temperature/0.0.0.0")

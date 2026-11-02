@@ -22,6 +22,7 @@ from baro.met.limits import set_host_limit
 from baro.met.materialize import WeatherRequest, materialize_radiation, materialize_weather
 from baro.met.openmeteo import OpenMeteoSource
 from baro.met.openmeteo_surface import OpenMeteoSurfaceSource
+from baro.met.pycontrails import PycontrailsWeather
 from baro.met.rangecache import RangeCache
 from baro.met.session import WeatherSession
 from baro.met.sources import GridSource, arco_model_levels, arco_pressure_levels
@@ -54,6 +55,7 @@ __all__ = [
     "OpenMeteoSource",
     "OpenMeteoSurfaceSource",
     "PiafSource",
+    "PycontrailsWeather",
     "RadiationCube",
     "RangeCache",
     "SampleOptions",

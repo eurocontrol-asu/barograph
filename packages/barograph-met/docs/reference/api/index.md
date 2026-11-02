@@ -52,6 +52,7 @@ the second is for writing a source of one's own or working on cubes directly.
         - RadiationCube
         - WeatherRequest
         - WeatherDemand
+        - PycontrailsWeather
         - GridSource
         - Tiling
         - RangeCache

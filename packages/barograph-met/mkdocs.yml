@@ -50,6 +50,7 @@ nav:
     - AROME pressure-level archive: howto/arome-pressure.md
     - Surface weather: howto/surface-weather.md
     - Weather cubes and contrail engines: howto/weather-cubes.md
+    - Lazy native pycontrails weather: howto/lazy-pycontrails-weather.md
     - Adaptive diffcocip evolution: howto/diffcocip.md
     - AROME forecast runs: howto/arome-runs.md
     - AROME-PI and PIAF: howto/immediate-forecasts.md
