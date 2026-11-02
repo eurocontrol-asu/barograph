@@ -3,7 +3,7 @@
 </p>
 
 <h1 align="center">barograph</h1>
-<p align="center"><strong>Enrich aircraft trajectories — starting with weather at full model resolution.</strong></p>
+<p align="center"><strong>Targeted weather for aircraft trajectories, fixed sites and contrail models.</strong></p>
 
 <p align="center">
   <a href="https://github.com/eurocontrol-asu/barograph/actions/workflows/ci.yml"><img src="https://github.com/eurocontrol-asu/barograph/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -16,22 +16,49 @@
 
 ---
 
-barograph is a uv workspace of Python packages that attach meteorological
-information to aircraft trajectories (ADS-B, flight data).
+barograph is a uv workspace of Python packages that retrieve meteorology along
+aircraft trajectories (ADS-B, flight data) or at fixed sites. Reads select the
+needed fields, times, levels and storage blocks, with explicit coverage and
+shared caching.
 
 ## Features
 
 | Package | Role |
 |---|---|
-| [`barograph-met`](packages/barograph-met) | Wind and temperature at aircraft positions from ERA5 (137 model levels or pressure levels) and Météo-France ARPEGE (live open data and the Open-Meteo archive), with partial reads of only the bytes a flight needs, explicit coverage, and a FastMeteo-compatible façade |
+| [`barograph-met`](packages/barograph-met) | Wind and temperature aloft; surface wind, gusts, precipitation and temperature; targeted ERA5 humidity, vertical motion, cirrus and radiation for optional contrail consumers |
 
-- [Lazy native pycontrails weather](packages/barograph-met/docs/howto/lazy-pycontrails-weather.md), with targeted field reads and optional bounded decoded Blosc reuse.
+| Source | Interface | Data and access |
+|---|---|---|
+| ERA5 | `arco_model_levels()`, `arco_pressure_levels()` | Reanalysis on model or pressure levels; public ARCO archive |
+| ARPEGE | `ArpegeSource`, `OpenMeteoSource` | Public native forecasts or assembled Open-Meteo archive |
+| IFS | `OpenMeteoSource("ecmwf_ifs025")` | Assembled forecast archive, native 3-hourly pressure-level wind/temperature |
+| AROME aloft | `OpenMeteoSource("meteofrance_arome_france0025")` | Public hourly assembled forecast archive |
+| AROME surface | `AromeSurfaceSource` | Public native forecasts, preserving initialization and lead |
+| AROME-PI | `AromePISource` | Surface forecasts every 15 minutes; Météo-France API subscription/key |
+| PIAF | `PiafSource` | Precipitation every 5 minutes; Météo-France API subscription/key |
+
+IFS and the Open-Meteo ARPEGE/AROME archives combine forecasts at valid times;
+their original run identities and leads are unavailable. They are distinct from
+ERA5 reanalysis. Fields and coverage depend on the selected source.
+
+- [IFS wind and temperature](packages/barograph-met/docs/howto/ifs.md).
+- [AROME aloft](packages/barograph-met/docs/howto/arome-pressure.md) and
+  [AROME surface forecasts](packages/barograph-met/docs/howto/arome-runs.md).
+- [AROME-PI/PIAF access and private key files](packages/barograph-met/docs/howto/immediate-forecasts.md#credentials-and-fixed-runs).
+- [Lazy native pycontrails weather](packages/barograph-met/docs/howto/lazy-pycontrails-weather.md), with targeted field reads and optional bounded decoded Blosc reuse. This supplies meteorology to the engine; it does not change contrail physics.
 
 ## Installation
 
 ```bash
-pip install 'barograph-met[grib,pandas,openmeteo]'
+git clone https://github.com/eurocontrol-asu/barograph.git
+cd barograph
+python -m pip install './packages/barograph-met[grib,pandas,openmeteo]'
+# Optional native pycontrails adapter and cirrus calculation:
+python -m pip install './packages/barograph-met[contrails]'
 ```
+
+Repository access is required while the project is private. For development,
+use the uv workspace setup below.
 
 ## Benchmarks
 
@@ -51,15 +78,19 @@ every point both tools serve.
 | ARPEGE 0.25°, official | FastMeteo ³ | 236 s · 2.6 GB | 504 s · 2.6 GB | 2.6 GB | 13 GB | reference |
 | | **barograph-met** | **95 s · 0.20 GB** | **211 s · 1.25 GB** | **1.2 GB** | **2.1 GB** | identical with the same 22 levels: \|Δ\| ≤ 3e-8 on 574 673 points ⁴ |
 
-At 1 000 flights barograph-met is 2.1–2.5× faster, downloads 2–2.3× less and
+In these acquisition benchmarks, at 1 000 flights barograph-met is 2.1–2.5×
+faster, downloads 2–2.3× less and
 needs 4–10× less memory; for a single flight it downloads 13–48× less and is
 2.5–22× faster (ARPEGE: indexing the files dominates the first call). FastMeteo and
-pycontrails download whole global fields for every hour they need, so their
+the compared pycontrails configuration download whole global fields for every
+hour they need, so their
 cost reaches a full day as soon as the flights cover it; barograph-met reads
 only the latitude bands, levels and messages the flights cross, so its cost
 grows with the area covered and levels off. Points it cannot interpolate
 (below the lowest level, invalid altitudes: 0.4–0.8 %) are flagged, never
-extrapolated.
+extrapolated. These measurements concern weather retrieval and interpolation;
+they do not compare CoCiP physics engines or establish the same ratios for
+other sources, retrieval configurations or cache states.
 
 1. Including the points where FastMeteo 1.2.0 extrapolates across the
    Greenwich seam, RMS 0.006 m/s and 0.002 K.
@@ -72,7 +103,7 @@ extrapolated.
 4. By default barograph-met also uses the 275 and 925 hPa levels that
    FastMeteo drops: 0.23 m/s and 0.12 K RMS from FastMeteo's values.
 
-### Coverage
+### Benchmarked coverage
 
 | Coverage | FastMeteo | pycontrails | barograph-met |
 |---|:---:|:---:|:---:|
@@ -87,7 +118,7 @@ Details in the [benchmark notes](https://github.com/eurocontrol-asu/barograph/bl
 ## Development
 
 ```bash
-uv sync --all-packages --all-groups
+uv sync --all-packages --all-groups --all-extras --locked
 uv run prek install --hook-type pre-commit --hook-type commit-msg --hook-type pre-push
 make check      # lint + types + tests
 make quality    # axm audit + axm init_check

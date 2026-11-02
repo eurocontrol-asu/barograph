@@ -47,6 +47,7 @@ nav:
     - howto/index.md
     - ERA5 (model or pressure levels): howto/era5.md
     - ARPEGE, live and archive: howto/arpege.md
+    - IFS pressure-level archive: howto/ifs.md
     - AROME pressure-level archive: howto/arome-pressure.md
     - Surface weather: howto/surface-weather.md
     - Weather cubes and contrail engines: howto/weather-cubes.md

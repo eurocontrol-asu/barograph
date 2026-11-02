@@ -2,7 +2,8 @@
 
 `AromePISource` and `PiafSource` retrieve geographically targeted surface
 forecasts through Météo-France's authenticated WCS APIs. Install the GRIB
-backend (`pip install 'barograph-met[grib]'`) and subscribe to each API in the
+backend (`pip install './packages/barograph-met[grib]'` from the repository
+root) and subscribe to each API in the
 [Météo-France portal](https://portail-api.meteofrance.fr/).
 
 | Source | Native grid | Output interval | Initializations | Maximum lead |
@@ -20,6 +21,33 @@ Keep credentials outside the repository. The following example reads an API
 key from a private local file; its contents are sent only in the `apikey`
 header, never in URLs or cache keys. Paths are application configuration,
 not hardcoded by the library.
+
+For example, create separate files for the API keys authorized for AROME-PI
+and PIAF. In Bash on Linux, this prompts without echoing either key or putting
+its value into shell history:
+
+```bash
+install -d -m 700 "$HOME/.config/barograph"
+(
+    umask 077
+    for api in arome-pi piaf; do
+        key_file="$HOME/.config/barograph/$api.token"
+        touch "$key_file"
+        chmod 600 "$key_file"
+        read -r -s -p "API key for $api: " barograph_key
+        printf '\n'
+        printf '%s\n' "$barograph_key" > "$key_file"
+        unset barograph_key
+    done
+)
+```
+
+The files are `~/.config/barograph/arome-pi.token` and
+`~/.config/barograph/piaf.token`, readable only by their owner. Keep them out of
+Git and do not paste their values into examples or issue reports. The library
+does not automatically search these paths or load a `.env` file: pass a token
+or a callable that reads your chosen file, as below. Public Open-Meteo archives
+and the native public AROME GRIB source do not require these API keys.
 
 ```python
 from pathlib import Path
