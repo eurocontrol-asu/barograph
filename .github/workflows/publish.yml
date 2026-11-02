@@ -2,69 +2,128 @@ name: Publish to PyPI
 
 on:
   push:
-    # Long tag convention: the prefix is the package directory
-    # (barograph-met/v0.1.0 -> packages/barograph-met), so a new package
-    # needs no CI change — only a tag.
     tags:
       - "*/v*"
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Tag to build (dry run, nothing is published)"
+      package:
+        description: "Package to test and build (never uploads on manual runs)"
         required: true
+        default: barograph-met
+        type: string
+      ref:
+        description: "Existing branch, commit or tag to build"
+        required: true
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.ref }}-${{ inputs.package }}
+  cancel-in-progress: false
 
 jobs:
   detect-package:
     name: Detect Package
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       package: ${{ steps.detect.outputs.package }}
       package-dir: ${{ steps.detect.outputs.package-dir }}
       publishable: ${{ steps.detect.outputs.publishable }}
+      version: ${{ steps.detect.outputs.version }}
+      commit: ${{ steps.commit.outputs.sha }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          fetch-depth: 0
       - id: detect
         uses: ./.github/actions/detect-package
         with:
-          tag: ${{ inputs.tag }}
+          package: ${{ inputs.package }}
+      - id: commit
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   test:
-    name: Run Tests (${{ needs.detect-package.outputs.package }})
+    name: Release tests (Python ${{ matrix.python-version }})
     needs: detect-package
     runs-on: ubuntu-latest
-    if: >-
-      needs.detect-package.outputs.publishable == 'true'
-      && github.event_name == 'push'
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
+      PACKAGE: ${{ needs.detect-package.outputs.package }}
+      PACKAGE_DIR: ${{ needs.detect-package.outputs.package-dir }}
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ needs.detect-package.outputs.commit }}
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v7
+      - run: uv python install "$UV_PYTHON"
+      - run: uv sync --all-packages --all-groups --all-extras --locked
+      - run: |
+          uv run --locked --package "$PACKAGE" --directory "$PACKAGE_DIR" pytest --cov -n auto
+          uv run --locked --package "$PACKAGE" --directory "$PACKAGE_DIR" coverage report
+
+  build:
+    name: Build and verify distributions
+    needs: [detect-package, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PACKAGE: ${{ needs.detect-package.outputs.package }}
+      EXPECTED_VERSION: ${{ needs.detect-package.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.detect-package.outputs.commit }}
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v7
       - run: uv python install 3.12
-      - run: uv sync --all-packages --all-groups
-      - run: uv run --package ${{ needs.detect-package.outputs.package }} --directory ${{ needs.detect-package.outputs.package-dir }} pytest --no-cov
+      # uv builds the wheel from the sdist; neither build needs an API token.
+      - run: uv build --package "$PACKAGE"
+      - run: python .github/scripts/release_ci.py check-dist --package "$PACKAGE" --version "$EXPECTED_VERSION"
+      - run: uv run --no-project --python 3.12 --with twine twine check --strict dist/*
+      - name: Verify wheel installation outside the source tree
+        run: |
+          uv venv --python 3.12 .artifact-venv
+          uv pip install --python .artifact-venv/bin/python dist/*.whl
+          .artifact-venv/bin/python -I -c 'from importlib.metadata import distribution; import sys; d = distribution(sys.argv[1]); print(d.metadata["Name"], d.version)' "$PACKAGE"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist-${{ needs.detect-package.outputs.package }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
 
   publish:
-    name: Build and Publish (${{ needs.detect-package.outputs.package }})
-    runs-on: ubuntu-latest
-    needs: [detect-package, test]
-    # Two gates: the package must not be private, and the run must come from
-    # a real tag push. A workflow_dispatch builds the artefact and stops.
+    name: Publish verified distributions
+    needs: [detect-package, build]
+    # Manual runs test, build and retain artifacts even while the package is
+    # private. Only an actual tag push can request a PyPI upload.
     if: >-
-      needs.detect-package.outputs.publishable == 'true'
-      && github.event_name == 'push'
+      github.event_name == 'push'
+      && startsWith(github.ref, 'refs/tags/')
+      && needs.detect-package.outputs.publishable == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     environment:
       name: pypi
       url: https://pypi.org/project/${{ needs.detect-package.outputs.package }}/
-    # Trusted Publishing (OIDC): no token stored in the repository.
     permissions:
       id-token: write
       contents: read
     steps:
-      - uses: actions/checkout@v7
+      # Publish exactly the bytes that passed validation; no second build.
+      - uses: actions/download-artifact@v8
         with:
-          fetch-depth: 0
-      - uses: astral-sh/setup-uv@v7
-      - run: uv python install 3.12
-      - run: uv build --package ${{ needs.detect-package.outputs.package }}
+          name: dist-${{ needs.detect-package.outputs.package }}
+          path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1

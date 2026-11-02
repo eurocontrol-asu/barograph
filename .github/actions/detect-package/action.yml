@@ -1,6 +1,10 @@
 name: Detect package
 description: Resolve the package a release tag designates and whether it may be published.
 inputs:
+  package:
+    description: Package directory name for a manual build without a tag
+    required: false
+    default: ""
   tag:
     description: Tag to resolve; defaults to the pushed ref.
     required: false
@@ -15,6 +19,9 @@ outputs:
   publishable:
     description: Whether the package allows external publication
     value: ${{ steps.detect.outputs.publishable }}
+  version:
+    description: Expected release version, empty for an untagged manual build
+    value: ${{ steps.detect.outputs.version }}
 runs:
   using: composite
   steps:
@@ -24,24 +31,10 @@ runs:
       shell: bash
       env:
         INPUT_TAG: ${{ inputs.tag }}
+        INPUT_PACKAGE: ${{ inputs.package }}
       run: |
-        TAG="${GITHUB_REF#refs/tags/}"
-        [ -z "$TAG" ] && TAG="$INPUT_TAG"
-        PKG="${TAG%%/*}"
-        DIR="packages/$PKG"
-        if [ ! -f "$DIR/pyproject.toml" ]; then
-          echo "::error::No package for tag prefix '$PKG' (expected $DIR/pyproject.toml)"
-          exit 1
+        TAG="$INPUT_TAG"
+        if [ -z "$TAG" ] && [ -z "$INPUT_PACKAGE" ] && [[ "$GITHUB_REF" == refs/tags/* ]]; then
+          TAG="${GITHUB_REF#refs/tags/}"
         fi
-        echo "package=$PKG" >> "$GITHUB_OUTPUT"
-        echo "package-dir=$DIR" >> "$GITHUB_OUTPUT"
-        # A package declares its own destination. PyPI refuses the
-        # "Private ::" classifier prefix on upload, so this is a double
-        # safety net rather than the only one. Every consumer of this action
-        # reads the same answer — the classifier is stated once, here.
-        if grep -q "Private :: Do Not Upload" "$DIR/pyproject.toml"; then
-          echo "publishable=false" >> "$GITHUB_OUTPUT"
-          echo "::notice::$PKG is declared private — no external publication"
-        else
-          echo "publishable=true" >> "$GITHUB_OUTPUT"
-        fi
+        python .github/scripts/release_ci.py detect --tag "$TAG" --package "$INPUT_PACKAGE"
