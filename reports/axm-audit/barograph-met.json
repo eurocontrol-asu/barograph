@@ -1,5 +1,5 @@
 {
-  "score": 95.4,
+  "score": 96.9,
   "grade": "A",
   "passed": [
     "ARCH_CIRCULAR: 0 circular import(s) found",
@@ -11,6 +11,7 @@
     "QUALITY_LINT: Lint score: 100/100 (0 issues)",
     "QUALITY_FORMAT: Format score: 100/100 (0 unformatted)",
     "QUALITY_DIFF_SIZE: No uncommitted changes",
+    "DEPS_AUDIT: No known vulnerabilities",
     "DEPS_HYGIENE: 1 dependency issue(s) found",
     "QUALITY_TYPE: Type score: 100/100 (0 errors)",
     "PRACTICE_TEST_MIRROR: All source modules have test files",
@@ -71,12 +72,6 @@
       "message": "Test coverage: 90% (89/100)",
       "text": "\u2022 cov 90% \u2192 100%",
       "fix_hint": "Increase test coverage to >= 90%"
-    },
-    {
-      "rule_id": "DEPS_AUDIT",
-      "message": "2 vulnerable package(s) found",
-      "text": "\u2022 certifi 2026.7.22\u21922026.10.18 PYSEC-2026-4320+1\n\u2022 filelock 4.0.7\u21924.0.9,4.2.1 CVE-2026-112940+13",
-      "fix_hint": "Run: pip-audit --fix to remediate"
     }
   ]
 }
