@@ -40,6 +40,8 @@ docs = [
     "mkdocs-literate-nav>=0.6.3",
 ]
 quality = [
+    # axm-audit 0.13 uses the SDK session dependency environment.
+    "axm>=0.10.0",
     "axm-audit>=0.12",
     "axm-init>=0.17",
 ]
@@ -54,6 +56,8 @@ constraint-dependencies = [
     "mypy==2.3.1",
     "pytest==9.1.1",
     "prek==0.5.4",
+    # axm-audit 0.13 imports instrument_command from this runtime.
+    "axm-ingot>=0.5.0",
     # Security audit, 2026-11-02: retain the upstream fixes in workspace locks.
     "certifi>=2026.10.18",
     "filelock>=4.2.1",

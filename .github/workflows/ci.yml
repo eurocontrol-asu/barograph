@@ -36,6 +36,12 @@ jobs:
       - run: uv sync --all-packages --all-groups --locked
       # Ruff + format + per-package mypy: the single source of truth is `make lint`.
       - run: make lint
+      # These providers use runtime APIs that dependency metadata may not bound.
+      # Catch incompatible lockfile updates before the main-only badge workflow.
+      - name: Check quality tool startup
+        run: |
+          uv run --locked axm audit --help
+          uv run --locked axm init_check --help
 
   security:
     name: Security Audit
