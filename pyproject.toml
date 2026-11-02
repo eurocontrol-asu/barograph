@@ -54,6 +54,10 @@ constraint-dependencies = [
     "mypy==2.3.1",
     "pytest==9.1.1",
     "prek==0.5.4",
+    # Security audit, 2026-11-02: retain the upstream fixes in workspace locks.
+    "certifi>=2026.10.18",
+    "filelock>=4.2.1",
+    "setuptools>=84.1.0",
 ]
 
 [tool.uv.workspace]

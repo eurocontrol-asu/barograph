@@ -16,3 +16,9 @@ coverage_html/
 .coverage
 site/
 _version.py
+
+# Local credentials; prefer private files outside the checkout.
+.env
+.env.*
+!.env.example
+*.token

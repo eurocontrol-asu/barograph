@@ -33,7 +33,7 @@ jobs:
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v7
       - run: uv python install 3.12
-      - run: uv sync --all-packages --all-groups
+      - run: uv sync --all-packages --all-groups --locked
       # Ruff + format + per-package mypy: the single source of truth is `make lint`.
       - run: make lint
 
@@ -46,7 +46,7 @@ jobs:
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v7
       - run: uv python install 3.12
-      - run: uv sync --all-packages --all-groups
+      - run: uv sync --all-packages --all-groups --locked
       # Blocking: a vulnerability with genuinely no upstream fix gets named
       # here (`--ignore-vuln ...`) as a dated decision, never a blanket switch.
       - run: uv run pip-audit
@@ -69,11 +69,16 @@ jobs:
           fetch-depth: 0
       - uses: astral-sh/setup-uv@v7
       - run: uv python install ${{ matrix.python-version }}
-      - run: uv sync --all-packages --all-groups
+      # Exercise optional readers and the native pycontrails bridge in both
+      # Python versions; otherwise those tests silently skip without the extra.
+      - run: uv sync --all-packages --all-groups --all-extras --locked
       - name: Test package
         env:
           PACKAGE: ${{ matrix.package.name }}
           PACKAGE_DIR: ${{ matrix.package.path }}
         # -n auto is set here, not in the package addopts: parallelism is a
         # property of the CI run; a local `pytest` stays sequential.
-        run: uv run --package "$PACKAGE" --directory "$PACKAGE_DIR" pytest --cov -n auto
+        run: |
+          uv run --package "$PACKAGE" --directory "$PACKAGE_DIR" pytest --cov -n auto
+          # Enforce the package's configured threshold on the written data.
+          uv run --package "$PACKAGE" --directory "$PACKAGE_DIR" coverage report

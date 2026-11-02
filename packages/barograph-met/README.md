@@ -40,8 +40,11 @@ along, cross = track_components(res["u"], res["v"], track_deg)
 - **Sources**: ERA5 from ARCO-ERA5 on its 137 model levels
   (`arco_model_levels`) or pressure levels (`arco_pressure_levels`);
   Météo-France ARPEGE open data, 0.1° Europe or 0.25° global
-  (`ArpegeSource`); the Open-Meteo archive of ARPEGE from December 2023
-  (`OpenMeteoSource`); any of them chained (`SourceChain`).
+  (`ArpegeSource`); Open-Meteo archives of ARPEGE, AROME and IFS
+  (`OpenMeteoSource`); any of them chained (`SourceChain`). IFS uses its native
+  3-hour step; ARPEGE and AROME are hourly. These assembled forecast archives
+  do not retain original forecast runs or leads and are distinct from ERA5
+  reanalysis. See [IFS](docs/howto/ifs.md) and [AROME aloft](docs/howto/arome-pressure.md).
 - **Surface weather**: 10 m wind and direction, gusts, precipitation and 2 m
   temperature with `SurfaceEnricher`. `OpenMeteoSurfaceSource` reads the stitched
   archive; `AromeSurfaceSource` reads an explicit forecast run and preserves its
@@ -51,18 +54,18 @@ along, cross = track_components(res["u"], res["v"], track_deg)
   fields) and `PiafSource` (5-minute precipitation) preserve forecast runs and
   request only the native grid neighbours needed by each query. See the
   [access and caching guide](docs/howto/immediate-forecasts.md).
-- **Only the bytes a flight needs**: partial reads of the compressed blocks of
+- **Selective reads**: partial reads of the compressed blocks of
   ARCO-ERA5 chunks (levels × latitude band), of GRIB2 messages (variables ×
-  levels × steps), and of Open-Meteo tiles; every time slice is read once for
-  all flights.
+  levels × steps), and of Open-Meteo tiles. Storage block boundaries impose
+  some over-read; shared caches reuse downloaded ranges across flights.
 - **Exact vertical coordinate**: level pressures from each grid column's
   actual surface pressure, interpolation in ln p.
 - **Explicit**: no silent extrapolation — every missing value has a flag, and
   points outside a source's period are reported.
-- **Campaign-ready**: the cost depends on the area and hours covered, not on
-  the number of flights; an on-disk cache of the byte ranges read, shared by
-  calls and processes (a byte is downloaded once, whatever the call order);
-  per-host concurrency caps, retry with backoff.
+- **Shared acquisition**: download volume grows with the area and hours
+  queried; an on-disk byte-range cache shared by calls and processes reuses
+  immutable data. Per-host concurrency caps and retry with backoff control
+  requests.
 - **Persistent weather sessions**: bounded decoded-cube reuse for successive
   point queries, with explicit pressure interpolation and field selection.
 - **Contrail weather**: targeted pressure-level windows, separate upper-column
@@ -70,15 +73,20 @@ along, cross = track_components(res["u"], res["v"], track_deg)
   a coverage-checked diffcocip forward driver with explicit age cap; see
   [weather grids](docs/howto/weather-cubes.md) and
   [adaptive evolution](docs/howto/diffcocip.md). Engine dependencies remain optional.
+- **Native pycontrails**: [lazy weather datasets](docs/howto/lazy-pycontrails-weather.md)
+  load fields when the engine requests slices. An optional bounded decoded-run
+  cache avoids repeated decompression across overlapping requests. Cache
+  budgets describe retained data, not total process memory.
 - **FastMeteo-compatible façade**: `baro.met.compat.ArcoEra5` and
   `Arpege`, same constructors and `interpolate(df)`.
 
 ## Installation
 
 ```bash
-pip install barograph-met                              # ERA5
-pip install 'barograph-met[grib,pandas,openmeteo]'     # + ARPEGE, FastMeteo façade, archive
-pip install 'barograph-met[contrails]'               # + pycontrails exports and cirrus calculation
+# From the repository root (repository access is required while private):
+python -m pip install ./packages/barograph-met                        # ERA5
+python -m pip install './packages/barograph-met[grib,pandas,openmeteo]' # + GRIB and archives
+python -m pip install './packages/barograph-met[contrails]'             # + optional engine
 ```
 
 ## Benchmarks
@@ -99,15 +107,19 @@ every point both tools serve.
 | ARPEGE 0.25°, official | FastMeteo ³ | 236 s · 2.6 GB | 504 s · 2.6 GB | 2.6 GB | 13 GB | reference |
 | | **barograph-met** | **95 s · 0.20 GB** | **211 s · 1.25 GB** | **1.2 GB** | **2.1 GB** | identical with the same 22 levels: \|Δ\| ≤ 3e-8 on 574 673 points ⁴ |
 
-At 1 000 flights barograph-met is 2.1–2.5× faster, downloads 2–2.3× less and
+In these acquisition benchmarks, at 1 000 flights barograph-met is 2.1–2.5×
+faster, downloads 2–2.3× less and
 needs 4–10× less memory; for a single flight it downloads 13–48× less and is
 2.5–22× faster (ARPEGE: indexing the files dominates the first call). FastMeteo and
-pycontrails download whole global fields for every hour they need, so their
+the compared pycontrails configuration download whole global fields for every
+hour they need, so their
 cost reaches a full day as soon as the flights cover it; barograph-met reads
 only the latitude bands, levels and messages the flights cross, so its cost
 grows with the area covered and levels off. Points it cannot interpolate
 (below the lowest level, invalid altitudes: 0.4–0.8 %) are flagged, never
-extrapolated.
+extrapolated. These measurements concern weather retrieval and interpolation;
+they do not compare CoCiP physics engines or establish the same ratios for
+other sources, retrieval configurations or cache states.
 
 1. Including the points where FastMeteo 1.2.0 extrapolates across the
    Greenwich seam, RMS 0.006 m/s and 0.002 K.
@@ -120,7 +132,7 @@ extrapolated.
 4. By default barograph-met also uses the 275 and 925 hPa levels that
    FastMeteo drops: 0.23 m/s and 0.12 K RMS from FastMeteo's values.
 
-### Coverage
+### Benchmarked coverage
 
 | Coverage | FastMeteo | pycontrails | barograph-met |
 |---|:---:|:---:|:---:|
@@ -145,7 +157,7 @@ doi:10.1002/qj.3803), via ARCO-ERA5 (Carver & Merose, 2023).
 ## Development
 
 ```bash
-uv sync --all-packages --all-groups
+uv sync --all-packages --all-groups --all-extras --locked
 uv run --package barograph-met --directory packages/barograph-met pytest   # offline suite
 uv run --package barograph-met --directory packages/barograph-met pytest -m live   # public buckets
 make lint
