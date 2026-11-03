@@ -7,8 +7,11 @@
 </p>
 
 <p align="center">
+  <a href="https://forge.axm-protocols.io/audit/"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/eurocontrol-asu/barograph/gh-pages/badges/barograph-met/axm-audit.json" alt="axm-audit"></a>
+  <a href="https://forge.axm-protocols.io/init/"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/eurocontrol-asu/barograph/gh-pages/badges/barograph-met/axm-init.json" alt="axm-init"></a>
   <a href="https://pypi.org/project/barograph-met/"><img src="https://img.shields.io/pypi/v/barograph-met" alt="PyPI"></a>
   <img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python 3.12+">
+  <a href="https://eurocontrol-asu.github.io/barograph/met/"><img src="https://img.shields.io/badge/docs-live-brightgreen" alt="Docs"></a>
   <img src="https://img.shields.io/badge/license-EUPL--1.2-blue" alt="EUPL-1.2">
 </p>
 
@@ -193,9 +196,8 @@ doi:10.1002/qj.3803), via ARCO-ERA5 (Carver & Merose, 2023).
 
 ## Development
 
-The following commands run from a repository checkout. Repository access is
-required while the source repository is private; installing from PyPI does
-not require it.
+For development, clone the public repository and run these commands from its
+root. Installing from PyPI does not require a repository checkout.
 
 ```bash
 uv sync --all-packages --all-groups --all-extras --locked

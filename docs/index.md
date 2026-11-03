@@ -5,6 +5,12 @@
 <h1 align="center">barograph</h1>
 <p align="center"><strong>Enrich aircraft trajectories — starting with weather at full model resolution.</strong></p>
 
+<p align="center">
+  <a href="https://forge.axm-protocols.io/audit/"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/eurocontrol-asu/barograph/gh-pages/badges/axm-audit.json" alt="axm-audit"></a>
+  <a href="https://forge.axm-protocols.io/init/"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/eurocontrol-asu/barograph/gh-pages/badges/axm-init.json" alt="axm-init"></a>
+  <a href="https://eurocontrol-asu.github.io/barograph/"><img src="https://img.shields.io/badge/docs-live-brightgreen" alt="Docs"></a>
+</p>
+
 barograph is a uv workspace of Python packages that attach meteorological
 information to aircraft trajectories (ADS-B, flight data). Its first package,
 [barograph-met](met/index.md), retrieves wind and temperature at aircraft

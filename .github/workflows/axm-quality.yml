@@ -46,7 +46,7 @@ jobs:
 
       - name: Define badge helpers
         run: |
-          cp assets/logo.svg /tmp/audit-logo.svg
+          cp assets/axm-logo.svg /tmp/audit-logo.svg
           cp /tmp/audit-logo.svg /tmp/init-logo.svg || true
 
 
@@ -117,7 +117,7 @@ jobs:
 
       - name: Define badge helpers
         run: |
-          cp assets/logo.svg /tmp/audit-logo.svg
+          cp assets/axm-logo.svg /tmp/audit-logo.svg
           cp /tmp/audit-logo.svg /tmp/init-logo.svg || true
 
       - name: Download this run's package artifacts

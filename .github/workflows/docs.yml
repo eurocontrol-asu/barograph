@@ -1,9 +1,19 @@
 name: Publish Docs
 
-# Manual only while the repository is private: a Pages site built from a
-# private repository is PUBLIC on most GitHub plans. Re-enable the push trigger
-# (branches: [main], docs paths) once publication has been approved.
+# Keep the public documentation aligned with main; manual deployment remains available.
 on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "packages/*/docs/**"
+      - "packages/*/src/**"
+      - "packages/*/mkdocs.yml"
+      - "packages/*/pyproject.toml"
+      - "mkdocs.yml"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/docs.yml"
   workflow_dispatch:
 
 # GitHub Pages is deployed from a build artifact, which leaves the gh-pages

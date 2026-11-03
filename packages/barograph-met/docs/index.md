@@ -1,5 +1,11 @@
 # barograph-met
 
+<p align="center">
+  <a href="https://forge.axm-protocols.io/audit/"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/eurocontrol-asu/barograph/gh-pages/badges/barograph-met/axm-audit.json" alt="axm-audit"></a>
+  <a href="https://forge.axm-protocols.io/init/"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/eurocontrol-asu/barograph/gh-pages/badges/barograph-met/axm-init.json" alt="axm-init"></a>
+  <a href="https://eurocontrol-asu.github.io/barograph/met/"><img src="https://img.shields.io/badge/docs-live-brightgreen" alt="Docs"></a>
+</p>
+
 Wind (`u`, `v`) and temperature (`t`) at aircraft positions — time, latitude,
 longitude and barometric altitude — from:
 
