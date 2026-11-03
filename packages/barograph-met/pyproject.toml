@@ -10,9 +10,7 @@ authors = [{ name = "Gabriel Jarry", email = "gabriel.jarry@eurocontrol.int" }]
 keywords = ["aviation", "ads-b", "era5", "arpege", "weather", "trajectory"]
 classifiers = [
     "Development Status :: 3 - Alpha",
-    # Upload guard: the publish workflow and PyPI both refuse this classifier.
-    # Remove it only when a public release has been approved.
-    "Private :: Do Not Upload",
+    "Operating System :: POSIX",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: European Union Public Licence 1.2 (EUPL 1.2)",
     "Programming Language :: Python :: 3.12",

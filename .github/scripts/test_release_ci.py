@@ -51,12 +51,20 @@ class ReleaseCITest(unittest.TestCase):
         self.assertEqual(result["package-dir"], "packages/barograph-met")
         self.assertEqual(result["version"], "0.1.0")
         self.assertEqual(result["publishable"], "true")
+        self.assertEqual(result["prerelease"], "false")
 
     def test_prerelease_and_development_tags_are_supported(self) -> None:
-        for version in ("0.1.0rc1", "1.2.3.dev4", "1.2.3.post1"):
+        for version, prerelease in (
+            ("0.1.0a1", "true"),
+            ("0.1.0b2", "true"),
+            ("0.1.0rc1", "true"),
+            ("1.2.3.dev4", "true"),
+            ("1.2.3.post1", "false"),
+        ):
             with self.subTest(version=version):
                 result = detect(self.root, f"barograph-met/v{version}", "")
                 self.assertEqual(result["version"], version)
+                self.assertEqual(result["prerelease"], prerelease)
 
     def test_manual_build_can_resolve_a_private_package_without_a_tag(self) -> None:
         self.metadata.write_text(
@@ -168,6 +176,10 @@ class CompositeActionTest(unittest.TestCase):
         result = self.action("refs/tags/barograph-met/v0.1.0")
         self.assertEqual(result["package"], "barograph-met")
         self.assertEqual(result["version"], "0.1.0")
+        self.assertEqual(result["prerelease"], "false")
+        alpha = self.action("refs/tags/barograph-met/v0.1.0a1")
+        self.assertEqual(alpha["version"], "0.1.0a1")
+        self.assertEqual(alpha["prerelease"], "true")
 
     def test_manual_package_build_ignores_the_workflow_ref_tag(self) -> None:
         result = self.action("refs/tags/other-package/v9.0.0", package="barograph-met")

@@ -22,6 +22,9 @@ outputs:
   version:
     description: Expected release version, empty for an untagged manual build
     value: ${{ steps.detect.outputs.version }}
+  prerelease:
+    description: Whether the detected version is a pre-release or development release
+    value: ${{ steps.detect.outputs.prerelease }}
 runs:
   using: composite
   steps:

@@ -42,6 +42,7 @@ def detect(root: Path, tag: str, package: str) -> dict[str, str]:
         "package-dir": f"packages/{package}",
         "publishable": str(not private).lower(),
         "version": version,
+        "prerelease": str(bool(re.search(r"(?:a|b|rc)\d+|\.dev\d+", version))).lower(),
     }
 
 

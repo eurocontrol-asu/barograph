@@ -39,4 +39,5 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           body: ${{ steps.git-cliff.outputs.content }}
+          prerelease: ${{ steps.detect.outputs.prerelease == 'true' }}
           token: ${{ secrets.GITHUB_TOKEN }}
