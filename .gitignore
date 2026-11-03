@@ -10,6 +10,9 @@ dist/
 build/
 *.egg-info/
 
+# macOS Finder metadata
+.DS_Store
+
 # coverage and build outputs
 coverage.xml
 coverage_html/
