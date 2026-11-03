@@ -11,7 +11,7 @@ longitude and barometric altitude — from:
 | ARPEGE, Open-Meteo archive | `OpenMeteoSource("meteofrance_arpege_europe")` | from 2023-12-01 | 24 / 34 pressure levels |
 | AROME, Open-Meteo archive | `OpenMeteoSource("meteofrance_arome_france0025")` | from late December 2023 | 24 pressure levels |
 | IFS, Open-Meteo archive | `OpenMeteoSource("ecmwf_ifs025")` | from January 2024 | available pressure levels, 3-hourly |
-| Any of the above, chained | `SourceChain(a, b, ...)` | union | — |
+| Compatible sources with the same fields and time step | `SourceChain(a, b, ...)` | union | — |
 
 ```python
 from baro.met import Enricher, arco_model_levels
@@ -34,6 +34,33 @@ precipitation and 2 m temperature; `AromeSurfaceSource` retains the initializati
 and lead time of an explicit AROME forecast run. Stitched archives do not
 retain that provenance. Period totals and maxima keep their native intervals
 rather than being linearly interpolated in time.
+
+## Installation
+
+Requires Python 3.12+ on a POSIX system (Linux or macOS). The shared disk
+cache uses POSIX file locks; native Windows is not supported.
+
+With uv, in an activated virtual environment:
+
+```bash
+uv pip install barograph-met
+uv pip install 'barograph-met[grib,pandas,openmeteo]'  # optional GRIB, DataFrames and archives
+```
+
+Or with pip:
+
+```bash
+python -m pip install barograph-met
+python -m pip install 'barograph-met[grib,pandas,openmeteo]'
+```
+
+For a uv-managed project, use `uv add barograph-met` and select extras as needed.
+The [tutorial](tutorials/getting-started.md) includes environment setup and a
+complete first-flight example.
+
+`SourceChain` requires identical output fields, matching time steps and distinct
+source IDs. In particular, hourly ERA5/ARPEGE sources cannot be chained with
+the three-hourly IFS archive.
 
 ## Why another tool
 

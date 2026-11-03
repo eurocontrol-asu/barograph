@@ -10,14 +10,20 @@ import numpy as np
 from baro.met.arome_surface import AromeSurfaceSource
 from baro.met.surface import SurfaceEnricher
 
-source = AromeSurfaceSource(run=np.datetime64("2026-10-06T00"))
+valid_time = np.datetime64("now", "h")  # current UTC hour
+source = AromeSurfaceSource.latest(valid_time)
 result = SurfaceEnricher(source, cache_dir="/tmp/weather-cache").enrich(
-    np.array(["2026-10-06T06:00"], dtype="datetime64[m]"),
+    np.array([valid_time]),
     lat=[48.85], lon=[2.35],
 )
 print(result.fields, result.run, result.lead)
 source.close()
 ```
+
+The example selects a run that is available now for the current UTC hour.
+For a reproducible historical run, pass an explicit `run=np.datetime64(...)`
+to `AromeSurfaceSource` and use a local mirror if the run has left the rolling
+server's retention window.
 
 The canonical fields are `u10`, `v10` (m/s), `t2m` (K), `precipitation` (mm)
 and `gusts` (m/s). Map output names with `fields={"temperature": "t2m"}`

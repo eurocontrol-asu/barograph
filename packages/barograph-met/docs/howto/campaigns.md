@@ -18,18 +18,20 @@ from baro.met import Enricher, arco_model_levels
 enricher = Enricher(arco_model_levels(), cache_dir="/shared/era5-cache")
 ```
 
-- Every byte read from a remote object is kept on disk, in the source's own
-  units (runs of Blosc blocks, GRIB messages, `.om` pages). A later call only
-  downloads the ranges no earlier call has read: flight by flight, a fleet at
-  once, in any order, from several processes.
+- Immutable remote data is kept on disk in the source's own units (runs of
+  Blosc blocks, GRIB messages, `.om` pages). Later calls and processes reuse
+  the ranges already present, whether flights are queried together or separately.
 - Only immutable data is kept: ERA5 hours older than about three months (the
   preliminary ERA5T may still be replaced), ARPEGE files of a published run,
   Open-Meteo chunks older than a week (recent hours are rewritten by newer
   runs). Store metadata is always re-read.
-- Extents are written atomically and never modified; missing ranges are
-  fetched under file locks on the 1 MiB windows they cover, so threads and
-  processes sharing the cache never download the same bytes twice, while
-  disjoint reads stay parallel.
+- Extents are written atomically and never modified. ARCO and GRIB reads
+  acquire file locks on the 1 MiB windows covering missing ranges and check
+  the cache again before downloading; disjoint reads stay parallel.
+- Open-Meteo pages reuse the same disk cache, but concurrent cache misses in
+  separate reader instances or processes can download the same page more than
+  once. In-flight requests are deduplicated within one reader. The stored
+  immutable bytes remain safe to share.
 - The cache only grows (nothing is ever evicted): size it for the campaign
   (for 1 000 worldwide flights of one day, about 3.6 GB for ERA5 on 22
   pressure levels and 15 GB on the 137 model levels) and delete the folder,

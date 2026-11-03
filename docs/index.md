@@ -25,6 +25,25 @@ positions from ERA5 and Météo-France ARPEGE:
 |---|---|
 | [barograph-met](met/index.md) | Retrieval and interpolation of ERA5, ARPEGE and Open-Meteo archives at aircraft positions |
 
+## Install barograph-met
+
+Requires Python 3.12+ on a POSIX system (Linux or macOS).
+
+With uv, in an activated virtual environment:
+
+```bash
+uv pip install 'barograph-met[grib,pandas,openmeteo]'
+```
+
+Or with pip:
+
+```bash
+python -m pip install 'barograph-met[grib,pandas,openmeteo]'
+```
+
+For a uv-managed project, use `uv add barograph-met` and select extras as needed.
+Start with the [first-flight tutorial](met/tutorials/getting-started.md).
+
 !!! danger "Research use only"
     This software is provided for research purposes and is not a regulatory
     or operational tool; EUROCONTROL disclaims any responsibility for misuse or

@@ -49,16 +49,30 @@ ERA5 reanalysis. Fields and coverage depend on the selected source.
 
 ## Installation
 
+Requires Python 3.12+ on a POSIX system (Linux or macOS). Native Windows is
+not supported because the shared disk cache uses POSIX file locks.
+
+With **uv**:
+
 ```bash
-git clone https://github.com/eurocontrol-asu/barograph.git
-cd barograph
-python -m pip install './packages/barograph-met[grib,pandas,openmeteo]'
+uv venv --python 3.12
+source .venv/bin/activate
+uv pip install 'barograph-met[grib,pandas,openmeteo]'
 # Optional native pycontrails adapter and cirrus calculation:
-python -m pip install './packages/barograph-met[contrails]'
+uv pip install 'barograph-met[contrails]'
 ```
 
-Repository access is required while the project is private. For development,
-use the uv workspace setup below.
+With **pip**, in your Python environment:
+
+```bash
+python -m pip install 'barograph-met[grib,pandas,openmeteo]'
+python -m pip install 'barograph-met[contrails]'
+```
+
+For ERA5 alone, install `barograph-met` without extras. In a uv-managed
+project, use `uv add 'barograph-met[grib,pandas,openmeteo]'` instead.
+Start with the [first-flight tutorial](https://eurocontrol-asu.github.io/barograph/met/tutorials/getting-started/).
+For development from source, use the workspace setup below.
 
 ## Benchmarks
 
@@ -113,7 +127,7 @@ other sources, retrieval configurations or cache states.
 | ARPEGE archive (since Dec 2023, Open-Meteo) | — | — | ✓, chained with the official feed |
 | Points outside the data | extrapolated | NaN | flagged |
 
-Details in the [benchmark notes](https://github.com/eurocontrol-asu/barograph/blob/main/packages/barograph-met/docs/explanation/benchmarks.md).
+Details in the [benchmark notes](https://eurocontrol-asu.github.io/barograph/met/explanation/benchmarks/).
 
 ## Development
 

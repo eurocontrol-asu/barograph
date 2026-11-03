@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/eurocontrol-asu/barograph/main/assets/logo.svg" alt="barograph" width="100" />
+  <img src="https://eurocontrol-asu.github.io/barograph/assets/logo.svg" alt="barograph" width="100" />
 </p>
 
 <p align="center">
@@ -7,10 +7,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/eurocontrol-asu/barograph/actions/workflows/ci.yml"><img src="https://github.com/eurocontrol-asu/barograph/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/eurocontrol-asu/barograph/actions/workflows/axm-quality.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/eurocontrol-asu/barograph/gh-pages/badges/barograph-met/axm-audit.json" alt="axm-audit"></a>
-  <a href="https://github.com/eurocontrol-asu/barograph/actions/workflows/axm-quality.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/eurocontrol-asu/barograph/gh-pages/badges/barograph-met/axm-init.json" alt="axm-init"></a>
-  <a href="https://github.com/eurocontrol-asu/barograph/actions/workflows/axm-quality.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/eurocontrol-asu/barograph/gh-pages/badges/barograph-met/coverage.json" alt="Coverage"></a>
+  <a href="https://pypi.org/project/barograph-met/"><img src="https://img.shields.io/pypi/v/barograph-met" alt="PyPI"></a>
   <img src="https://img.shields.io/badge/python-3.12%2B-blue" alt="Python 3.12+">
   <img src="https://img.shields.io/badge/license-EUPL--1.2-blue" alt="EUPL-1.2">
 </p>
@@ -25,26 +22,17 @@ For contrail modelling, it can retrieve ERA5 humidity, pressure velocity,
 cirrus optical depth and radiation, export native grids to pycontrails or
 diffcocip, and supply weather during checked forward diffcocip evolution.
 
-```python
-from baro.met import Enricher, arco_model_levels, track_components
-
-res = Enricher(arco_model_levels(), cache_dir="~/data/era5-cache").enrich(
-    time_utc, lat, lon, altitude_ft=baro_alt_ft
-)
-res["u"], res["v"], res["t"], res.flags, res.stats
-along, cross = track_components(res["u"], res["v"], track_deg)
-```
-
 ## Features
 
 - **Sources**: ERA5 from ARCO-ERA5 on its 137 model levels
   (`arco_model_levels`) or pressure levels (`arco_pressure_levels`);
   Météo-France ARPEGE open data, 0.1° Europe or 0.25° global
   (`ArpegeSource`); Open-Meteo archives of ARPEGE, AROME and IFS
-  (`OpenMeteoSource`); any of them chained (`SourceChain`). IFS uses its native
-  3-hour step; ARPEGE and AROME are hourly. These assembled forecast archives
+  (`OpenMeteoSource`). `SourceChain` combines sources with the same output
+  fields and time step; hourly sources cannot be chained with three-hourly IFS.
+  IFS uses its native 3-hour step; ARPEGE and AROME are hourly. These archives
   do not retain original forecast runs or leads and are distinct from ERA5
-  reanalysis. See [IFS](docs/howto/ifs.md) and [AROME aloft](docs/howto/arome-pressure.md).
+  reanalysis. See [IFS](https://eurocontrol-asu.github.io/barograph/met/howto/ifs/) and [AROME aloft](https://eurocontrol-asu.github.io/barograph/met/howto/arome-pressure/).
 - **Surface weather**: 10 m wind and direction, gusts, precipitation and 2 m
   temperature with `SurfaceEnricher`. `OpenMeteoSurfaceSource` reads the stitched
   archive; `AromeSurfaceSource` reads an explicit forecast run and preserves its
@@ -53,7 +41,7 @@ along, cross = track_components(res["u"], res["v"], track_deg)
 - **Immediate forecasts**: authenticated `AromePISource` (15-minute surface
   fields) and `PiafSource` (5-minute precipitation) preserve forecast runs and
   request only the native grid neighbours needed by each query. See the
-  [access and caching guide](docs/howto/immediate-forecasts.md).
+  [access and caching guide](https://eurocontrol-asu.github.io/barograph/met/howto/immediate-forecasts/).
 - **Selective reads**: partial reads of the compressed blocks of
   ARCO-ERA5 chunks (levels × latitude band), of GRIB2 messages (variables ×
   levels × steps), and of Open-Meteo tiles. Storage block boundaries impose
@@ -71,9 +59,9 @@ along, cross = track_components(res["u"], res["v"], track_deg)
 - **Contrail weather**: targeted pressure-level windows, separate upper-column
   cirrus dependencies and ERA5 midpoint radiation. Optional engine exports and
   a coverage-checked diffcocip forward driver with explicit age cap; see
-  [weather grids](docs/howto/weather-cubes.md) and
-  [adaptive evolution](docs/howto/diffcocip.md). Engine dependencies remain optional.
-- **Native pycontrails**: [lazy weather datasets](docs/howto/lazy-pycontrails-weather.md)
+  [weather grids](https://eurocontrol-asu.github.io/barograph/met/howto/weather-cubes/) and
+  [adaptive evolution](https://eurocontrol-asu.github.io/barograph/met/howto/diffcocip/). Engine dependencies remain optional.
+- **Native pycontrails**: [lazy weather datasets](https://eurocontrol-asu.github.io/barograph/met/howto/lazy-pycontrails-weather/)
   load fields when the engine requests slices. An optional bounded decoded-run
   cache avoids repeated decompression across overlapping requests. Cache
   budgets describe retained data, not total process memory.
@@ -82,12 +70,61 @@ along, cross = track_components(res["u"], res["v"], track_deg)
 
 ## Installation
 
+Requires Python 3.12+ on a POSIX system (Linux or macOS). Native Windows is
+not supported because the shared disk cache uses POSIX file locks.
+
+With **uv**:
+
 ```bash
-# From the repository root (repository access is required while private):
-python -m pip install ./packages/barograph-met                        # ERA5
-python -m pip install './packages/barograph-met[grib,pandas,openmeteo]' # + GRIB and archives
-python -m pip install './packages/barograph-met[contrails]'             # + optional engine
+uv venv --python 3.12
+source .venv/bin/activate
+uv pip install barograph-met                              # ERA5
+uv pip install 'barograph-met[grib,pandas,openmeteo]'       # GRIB, DataFrames and archives
+uv pip install 'barograph-met[contrails]'                   # optional pycontrails integration
 ```
+
+With **pip**, in your Python environment:
+
+```bash
+python -m pip install barograph-met
+python -m pip install 'barograph-met[grib,pandas,openmeteo]'
+python -m pip install 'barograph-met[contrails]'
+```
+
+In an existing uv-managed project, use `uv add barograph-met` or
+`uv add 'barograph-met[grib,pandas,openmeteo]'`. Extras are independent;
+choose only the data sources and integrations you need.
+
+## Quick start
+
+This example samples a short synthetic flight from the public ERA5 archive.
+The first run downloads weather; subsequent runs reuse immutable cached data.
+
+```python
+import numpy as np
+from baro.met import Enricher, arco_model_levels, track_components
+
+n = 60
+time_utc = np.datetime64("2020-01-01T10:00") + np.arange(n) * np.timedelta64(30, "s")
+lat = np.linspace(48.7, 47.5, n)
+lon = np.linspace(2.4, 3.2, n)
+altitude_ft = np.full(n, 35_000.0)  # barometric (pressure) altitude
+track_deg = np.full(n, 150.0)
+
+res = Enricher(arco_model_levels(), cache_dir="~/data/era5-cache").enrich(
+    time_utc, lat, lon, altitude_ft=altitude_ft
+)
+along, cross = track_components(res["u"], res["v"], track_deg)
+print(res["t"][:3], res.flags[:3])  # temperature in kelvin; flag 0 means valid
+print(res.stats)
+```
+
+## Documentation
+
+- [First-flight tutorial](https://eurocontrol-asu.github.io/barograph/met/tutorials/getting-started/).
+- [Data sources and how-to guides](https://eurocontrol-asu.github.io/barograph/met/howto/).
+- [Public Python API](https://eurocontrol-asu.github.io/barograph/met/reference/api/).
+- [Flags and statistics](https://eurocontrol-asu.github.io/barograph/met/reference/flags/).
 
 ## Benchmarks
 
@@ -142,7 +179,7 @@ other sources, retrieval configurations or cache states.
 | ARPEGE archive (since Dec 2023, Open-Meteo) | — | — | ✓, chained with the official feed |
 | Points outside the data | extrapolated | NaN | flagged |
 
-Details in the [benchmark notes](https://github.com/eurocontrol-asu/barograph/blob/main/packages/barograph-met/docs/explanation/benchmarks.md).
+Details in the [benchmark notes](https://eurocontrol-asu.github.io/barograph/met/explanation/benchmarks/).
 
 ## FastMeteo
 
@@ -155,6 +192,10 @@ backend. ERA5 data: Copernicus Climate Change Service (Hersbach et al. 2020,
 doi:10.1002/qj.3803), via ARCO-ERA5 (Carver & Merose, 2023).
 
 ## Development
+
+The following commands run from a repository checkout. Repository access is
+required while the source repository is private; installing from PyPI does
+not require it.
 
 ```bash
 uv sync --all-packages --all-groups --all-extras --locked
@@ -186,4 +227,5 @@ work that uses the values:
 
 ## License
 
-[EUPL-1.2](LICENSE) — © 2026 Eurocontrol
+[EUPL-1.2](https://eupl.eu/1.2/en/) — © 2026 Eurocontrol. The full licence
+text is included in the source and wheel distributions.

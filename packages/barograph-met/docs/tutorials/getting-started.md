@@ -5,10 +5,26 @@ temperature on the 137 model levels.
 
 ## Install
 
+Requires Python 3.12+ on a POSIX system (Linux or macOS). Native Windows is
+not supported because the shared disk cache uses POSIX file locks.
+
+Create an environment and install from PyPI with **uv**:
+
 ```bash
-pip install barograph-met            # ERA5 only
-pip install 'barograph-met[grib,pandas,openmeteo]'   # ARPEGE, FastMeteo façade, Open-Meteo archive
+uv venv --python 3.12
+source .venv/bin/activate
+uv pip install barograph-met
 ```
+
+Or use **pip** in your Python environment:
+
+```bash
+python -m pip install barograph-met
+```
+
+For ARPEGE, the FastMeteo DataFrame façade and Open-Meteo archives, install
+`'barograph-met[grib,pandas,openmeteo]'` with either installer. In an existing
+uv-managed project, `uv add barograph-met` records the dependency in your project.
 
 ## A first flight
 
