@@ -1,9 +1,16 @@
 # IFS pressure-level wind and temperature
 
 Use `OpenMeteoSource("ecmwf_ifs025")` to interpolate IFS wind and temperature
-at aircraft positions from Open-Meteo's public archive. From the repository
-root, install with `pip install './packages/barograph-met[openmeteo]'`;
-no API key is required.
+at aircraft positions from Open-Meteo's public archive. Install the archive
+backend from PyPI:
+
+```bash
+uv pip install 'barograph-met[openmeteo]'
+# or
+python -m pip install 'barograph-met[openmeteo]'
+```
+
+No API key is required.
 
 ```python
 import numpy as np

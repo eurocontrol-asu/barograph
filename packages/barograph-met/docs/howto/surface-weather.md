@@ -11,7 +11,7 @@ from baro.met import OpenMeteoSurfaceSource, SurfaceEnricher
 when = np.array(["2026-04-15T14:00", "2026-04-15T14:30"], dtype="datetime64[ns]")
 
 with OpenMeteoSurfaceSource("meteofrance_arome_france0025") as source:
-    query = SurfaceEnricher(source, cache_dir="/data/weather-cache")
+    query = SurfaceEnricher(source, cache_dir="weather-cache")
     weather = query.enrich(when, lat=48.8566, lon=2.3522)
     wind = weather["wind_speed"]
     rain = weather["rain"]

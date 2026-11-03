@@ -2,8 +2,15 @@
 
 `AromePISource` and `PiafSource` retrieve geographically targeted surface
 forecasts through Météo-France's authenticated WCS APIs. Install the GRIB
-backend (`pip install './packages/barograph-met[grib]'` from the repository
-root) and subscribe to each API in the
+backend from PyPI:
+
+```bash
+uv pip install 'barograph-met[grib]'
+# or
+python -m pip install 'barograph-met[grib]'
+```
+
+Subscribe to each API in the
 [Météo-France portal](https://portail-api.meteofrance.fr/).
 
 | Source | Native grid | Output interval | Initializations | Maximum lead |

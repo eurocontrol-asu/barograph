@@ -4,12 +4,34 @@
 only when pycontrails evaluates spatial, pressure and time slices. It uses
 Barograph's normal selective range reader and optional shared byte cache; it
 does not replace or patch CoCiP physics. Install the optional pycontrails stack
-before calling `datasets`; importing Barograph does not import that stack.
+from PyPI before calling `datasets`; importing Barograph does not import that
+stack:
+
+```bash
+uv pip install 'barograph-met[contrails]'
+# or
+python -m pip install 'barograph-met[contrails]'
+```
+
+This example uses a short synthetic flight and caps contrail evolution at
+20 minutes to keep the demonstration small. `PSFlight` supplies aircraft
+performance inputs for the A320.
 
 ```python
 import numpy as np
 from baro.met import ArcoRadiationSource, PycontrailsWeather, arco_pressure_levels
+from pycontrails import Flight
 from pycontrails.models.cocip import Cocip
+from pycontrails.models.ps_model import PSFlight
+
+flight = Flight(
+    longitude=np.linspace(1.0, 2.5, 10),
+    latitude=np.full(10, 48.5),
+    altitude=np.full(10, 11000.0),  # metres
+    time=np.arange("2017-01-01T00:10", "2017-01-01T00:20", dtype="datetime64[m]"),
+    aircraft_type="A320",
+    flight_id="example",
+)
 
 # Keep the complete native pressure column for optical-depth dependencies.
 source = arco_pressure_levels(fields={
@@ -18,13 +40,16 @@ source = arco_pressure_levels(fields={
     "ciwc": "specific_cloud_ice_water_content",
 })
 radiation = ArcoRadiationSource()
-weather = PycontrailsWeather(source, radiation, cache_dir="/path/to/cache")
+weather = PycontrailsWeather(source, radiation, cache_dir="weather-cache")
 met, rad = weather.datasets(
-    np.datetime64("2017-01-01T00"), np.datetime64("2017-01-01T06")
+    np.datetime64("2017-01-01T00"), np.datetime64("2017-01-01T02")
 )
 model = Cocip(met, rad, params={
     "interpolation_bounds_error": True,
     "compute_tau_cirrus_in_model_init": False,
+    "aircraft_performance": PSFlight(),
+    "max_age": np.timedelta64(20, "m"),
+    "dt_integration": np.timedelta64(5, "m"),
 })
 result = model.eval(flight)
 print(weather.cache_info())
