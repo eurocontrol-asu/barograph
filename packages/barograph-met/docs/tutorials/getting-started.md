@@ -26,6 +26,9 @@ For ARPEGE, the FastMeteo DataFrame façade and Open-Meteo archives, install
 `'barograph-met[grib,pandas,openmeteo]'` with either installer. In an existing
 uv-managed project, `uv add barograph-met` records the dependency in your project.
 
+Wind and temperature are the default fields; the `fields=` argument of each
+source selects others, listed in [Variables by source](../reference/variables.md).
+
 ## A first flight
 
 ```python

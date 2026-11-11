@@ -13,7 +13,8 @@ pl22 = Enricher(arco_pressure_levels(levels=[100, 125, 150, 175, 200, 225, 250,
 - **Altitude**: pass `altitude_ft=` (barometric/pressure altitude, converted
   with the ICAO standard atmosphere — exact for ADS-B) or `pressure_pa=`.
 - **Other variables**: `fields={"q": "specific_humidity"}` maps output names to
-  ARCO array names.
+  ARCO array names. A non-empty `fields` replaces the default `u`, `v`, `t`; see
+  [Variables by source](../reference/variables.md).
 - **Vertical interpolation**: `Enricher(source, vertical="linear")` interpolates
   linearly in pressure instead of in ln p;
   `surface_pressure="standard"` ignores the actual surface pressure (ablation:

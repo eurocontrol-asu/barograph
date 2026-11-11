@@ -48,3 +48,8 @@ bracketing a point always come from the same source. On a flight covered by
 both, the two differ by 0.035 m/s (wind) and 0.08 K (temperature) RMS — the
 archive's quantisation. Points before the archive starts are flagged
 `OUT_OF_COVERAGE` and reported in a warning.
+
+**Other variables**: `ArpegeSource(fields={"u": "u", "v": "v", "t": "t", "r": "r"})`
+selects among the names listed in [Variables by source](../reference/variables.md);
+the Open-Meteo archive takes the same kind of mapping. An unknown name raises
+`ValueError`.

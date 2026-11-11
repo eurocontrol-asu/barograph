@@ -6,8 +6,10 @@
   <a href="https://eurocontrol-asu.github.io/barograph/met/"><img src="https://img.shields.io/badge/docs-live-brightgreen" alt="Docs"></a>
 </p>
 
-Wind (`u`, `v`) and temperature (`t`) at aircraft positions — time, latitude,
-longitude and barometric altitude — from:
+Weather at aircraft positions — time, latitude, longitude and barometric
+altitude. Wind (`u`, `v`) and temperature (`t`) are the default fields; other
+variables are selected with `fields=` (see [Variables by source](reference/variables.md)).
+Sources:
 
 | Source | Class / function | Period | Vertical |
 |---|---|---|---|

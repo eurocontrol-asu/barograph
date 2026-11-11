@@ -88,3 +88,4 @@ markdown_extensions:
 
 exclude_docs: |
   gen_ref_pages.py
+  gen_variables_page.py

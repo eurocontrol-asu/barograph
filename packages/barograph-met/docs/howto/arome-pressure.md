@@ -27,6 +27,10 @@ is in m/s and temperature in kelvin. Each point uses horizontal, pressure
 and time interpolation. Missing or outside points have flags and NaN values.
 Pressure levels alone do not supply terrain or actual surface pressure.
 
+**Other variables**: `fields=` also accepts the other names listed in
+[Variables by source](../reference/variables.md); wind and temperature are only
+the defaults.
+
 `merge_adjacent_tiles=False` groups points by their own native tile, with
 the requested margin and pressure range applied separately to each group.
 This bounds the size of each request even when a long trajectory occupies
