@@ -32,6 +32,10 @@ with OpenMeteoSource(
     flags = result.flags
 ```
 
+**Other variables**: `fields=` also accepts the other names listed in
+[Variables by source](../reference/variables.md); wind and temperature are only
+the defaults.
+
 Altitude is pressure altitude in feet. Wind components are in m/s and
 temperature in kelvin. Interpolation uses the surrounding horizontal grid
 points, pressure levels and native times. Missing fields, levels, dates or

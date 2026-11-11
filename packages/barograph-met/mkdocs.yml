@@ -9,6 +9,7 @@ plugins:
   - gen-files:
       scripts:
         - docs/gen_ref_pages.py
+        - docs/gen_variables_page.py
   - literate-nav:
       nav_file: SUMMARY.md
   - mkdocstrings:
@@ -59,6 +60,7 @@ nav:
     - Campaigns, cache and parallelism: howto/campaigns.md
   - Reference:
     - Flags and statistics: reference/flags.md
+    - Variables by source: reference/variables.md
     - Public Python API: reference/api/index.md
     - Internal Module Reference: reference/
   - Explanation:
@@ -69,3 +71,4 @@ nav:
 
 exclude_docs: |
   gen_ref_pages.py
+  gen_variables_page.py

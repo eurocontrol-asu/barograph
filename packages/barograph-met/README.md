@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>barograph-met — wind and temperature at aircraft positions, fast and explicit</strong>
+  <strong>barograph-met — weather at aircraft positions (wind and temperature by default), fast and explicit</strong>
 </p>
 
 <p align="center">
@@ -17,8 +17,10 @@
 
 ---
 
-`barograph-met` interpolates wind (`u`, `v`) and temperature (`t`) at
-aircraft positions (time, latitude, longitude, barometric altitude).
+`barograph-met` interpolates weather at aircraft positions (time, latitude,
+longitude, barometric altitude). Wind (`u`, `v`) and temperature (`t`) are the
+default fields; other variables are selected with `fields=` ([variables by
+source](https://eurocontrol-asu.github.io/barograph/met/reference/variables/)).
 It also retrieves surface weather at fixed sites or along trajectories using
 only time, latitude and longitude.
 For contrail modelling, it can retrieve ERA5 humidity, pressure velocity,

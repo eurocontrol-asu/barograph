@@ -1,5 +1,6 @@
 """Generate module references and navigation for the assembled workspace site."""
 
+import runpy
 from pathlib import Path
 
 import mkdocs_gen_files
@@ -66,6 +67,13 @@ for pkg_dir in sorted(packages_dir.iterdir()):
     if not config_path.is_file():
         continue
     config = yaml.load(config_path.read_text(), Loader=yaml.BaseLoader)  # noqa: S506 - BaseLoader builds only str/list/dict (no objects); needed for !include tags
+    # Hand-written reference pages generated from code constants.
+    variables_script = pkg_dir / "docs/gen_variables_page.py"
+    if variables_script.is_file():
+        runpy.run_path(
+            str(variables_script),
+            init_globals={"OUTPUT": Path(config["site_name"], "reference/variables.md").as_posix()},
+        )
     if "reference/api/" not in _nav_paths(config.get("nav", [])):
         continue
     if (pkg_dir / "docs/reference/api/index.md").is_file():
