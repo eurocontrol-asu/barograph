@@ -1,5 +1,5 @@
 {
-  "score": 96.9,
+  "score": 96.4,
   "grade": "A",
   "passed": [
     "ARCH_CIRCULAR: 0 circular import(s) found",
@@ -12,7 +12,6 @@
     "QUALITY_FORMAT: Format score: 100/100 (0 unformatted)",
     "QUALITY_DIFF_SIZE: No uncommitted changes",
     "DEPS_AUDIT: No known vulnerabilities",
-    "DEPS_HYGIENE: 1 dependency issue(s) found",
     "QUALITY_TYPE: Type score: 100/100 (0 errors)",
     "PRACTICE_TEST_MIRROR: All source modules have test files",
     "PRACTICE_TEST_SCENARIO_NAMING: No anti-mirror naming violations",
@@ -21,7 +20,7 @@
     {
       "rule_id": "PRACTICE_DOCSTRING",
       "message": "Docstring coverage: 88% (215/244)",
-      "text": "     \u2022 baro/met/immediate.py: catalog, metadata, field, validate\n     \u2022 baro/met/surface.py: stats, coverage, cube_keys, tiling, use_cache, fetch\n     \u2022 baro/met/arome_surface.py: stats, close, tiling, use_cache, published_runs, coverage, cube_keys, file_key, fetch\n     \u2022 baro/met/diffcocip.py: reset, temperature\n     \u2022 baro/met/session.py: contains, fetch\n     \u2022 baro/met/wcs.py: fetch\n     \u2022 baro/met/store.py: configure, clear, info, get, load",
+      "text": "     \u2022 baro/met/session.py: contains, fetch\n     \u2022 baro/met/surface.py: stats, coverage, cube_keys, tiling, use_cache, fetch\n     \u2022 baro/met/diffcocip.py: reset, temperature\n     \u2022 baro/met/store.py: configure, clear, info, get, load\n     \u2022 baro/met/wcs.py: fetch\n     \u2022 baro/met/immediate.py: catalog, metadata, field, validate\n     \u2022 baro/met/arome_surface.py: stats, close, tiling, use_cache, published_runs, coverage, cube_keys, file_key, fetch",
       "fix_hint": "Add docstrings to public functions"
     },
     "PRACTICE_ENV_CREDENTIAL_READ: 0 credential environment read(s) found",
@@ -72,6 +71,12 @@
       "message": "Test coverage: 90% (89/100)",
       "text": "\u2022 cov 90% \u2192 100%",
       "fix_hint": "Increase test coverage to >= 90%"
+    },
+    {
+      "rule_id": "DEPS_HYGIENE",
+      "message": "2 dependency issue(s) found",
+      "text": "\u2022 DEP004 mkdocs_gen_files: misplaced dev dep\n\u2022 DEP004 mkdocs_gen_files: misplaced dev dep",
+      "fix_hint": "Run: deptry . to see details"
     }
   ]
 }
